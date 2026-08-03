@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# Virtual environments
+.venv
+venv/
+
+# Test / type-check / coverage artifacts
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Claude Code local state
+.claude/settings.local.json
+.claude/scheduled_tasks.lock
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Project-specific
+SPEC.md
+examples/2d_example/output/
+examples/kaggle_titanic/seed_solutions/output/
+examples/gms8k_benchmarking/data/
+results.csv
+logs/
+
+credentials.sh
+
+TODO.md
+
+# Not part of the lean project
+temp/
+.keys
+.claude/

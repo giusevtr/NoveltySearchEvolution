@@ -1,0 +1,22 @@
+[project]
+name = "novelty-search-evolution"
+version = "0.1.0"
+requires-python = "==3.12.*"
+dependencies = [
+    "numpy",
+    "scipy",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-mock>=3.14",
+    "pytest-asyncio>=0.24",
+]
+examples = [
+    "matplotlib",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v"
