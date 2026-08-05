@@ -33,12 +33,19 @@ htmlcov/
 # Project-specific
 SPEC.md
 examples/2d_example/output/
+examples/high_dim_classification_example/output/
 examples/kaggle_titanic/seed_solutions/output/
 examples/gms8k_benchmarking/data/
+examples/gsm8k_distillation/checkpoints/
+examples/gsm8k_distillation/data/
+examples/gsm8k_distillation/output/embedding_cache/
+examples/gsm8k_distillation/output/synthetic_distillation_old.parquet
 results.csv
 logs/
 
 credentials.sh
+wandb/
+/artifacts/
 
 TODO.md
 
@@ -46,3 +53,4 @@ TODO.md
 temp/
 .keys
 .claude/
+uv.lock

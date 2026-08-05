@@ -1,0 +1,12 @@
+{
+  "run_name": "teacher",
+  "mode": "teacher",
+  "model": "teacher (Bedrock)",
+  "lora_path": null,
+  "num_questions": 1319,
+  "k": 1,
+  "mean_correctness_rate": 0.9522365428354814,
+  "pass_at_k_rate": 0.9522365428354814,
+  "num_parsing_errors": 7,
+  "parsing_error_rate": 0.00530705079605762
+}
