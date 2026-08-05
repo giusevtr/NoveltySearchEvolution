@@ -1,0 +1,13 @@
+langchain-aws
+vllm
+pandas
+pyarrow
+matplotlib
+transformers
+trl
+peft
+datasets
+tqdm
+data-designer
+fastapi
+uvicorn
