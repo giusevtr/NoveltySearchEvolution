@@ -65,6 +65,15 @@ class TestRenderPopulationHtml:
         assert html.strip().startswith("<!doctype html>")
         assert "const SAMPLES = []" in html
 
+    def test_embedded_json_cannot_break_out_of_script_block(self):
+        samples = make_samples()
+        samples[0]["data"] = {"prompt": "</script><img src=x onerror=alert(1)>", "solution": "x"}
+        samples[0]["feedback"] = ["<!--<script>"]
+        html = render_population_html(samples)
+        assert "</script><img" not in html
+        assert html.count("</script>") == 1
+        assert "\\u003c/script\\u003e" in html
+
     def test_handles_non_dict_data(self):
         samples = [
             {
@@ -96,4 +105,4 @@ class TestRenderPopulationHtml:
         ]
         html = render_population_html(samples)
         assert "</script><h1>" not in html
-        assert "\\u003c/script>" in html
+        assert "\\u003c/script\\u003e" in html

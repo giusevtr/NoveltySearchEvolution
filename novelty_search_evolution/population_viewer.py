@@ -68,17 +68,22 @@ _TEMPLATE = """\
 const SAMPLES = __SAMPLES_JSON__;
 const BY_ID = {};
 for (const s of SAMPLES) { BY_ID[s.id] = s; }
+const STATUS_CLASSES = new Set(["active", "inactive", "stale", "rejected"]);
 
 function preview(data) {
   const s = (typeof data === "object") ? JSON.stringify(data) : String(data);
   return s.length > 60 ? s.slice(0, 60) + "..." : s;
 }
 
+function statusClass(status) {
+  return STATUS_CLASSES.has(status) ? status : "";
+}
+
 function populateFilters() {
   const gens = [...new Set(SAMPLES.map(s => s.generation))].sort((a, b) => a - b);
   const genSelect = document.getElementById("gen-filter");
   genSelect.innerHTML = '<option value="">all</option>' +
-    gens.map(g => `<option value="${g}">${g}</option>`).join("");
+    gens.map(g => `<option value="${escapeHtml(g)}">${escapeHtml(g)}</option>`).join("");
 }
 
 function renderTable() {
@@ -93,11 +98,11 @@ function renderTable() {
     tr.className = "sample-row";
     tr.onclick = () => showDetail(s.id);
     tr.innerHTML = `
-      <td>${s.id.slice(0, 8)}</td>
-      <td><span class="badge ${s.status}">${s.status}</span></td>
-      <td>${s.generation}</td>
-      <td>${s.depth}</td>
-      <td>${preview(s.data)}</td>
+      <td>${escapeHtml(String(s.id).slice(0, 8))}</td>
+      <td><span class="badge ${escapeHtml(statusClass(s.status))}">${escapeHtml(s.status)}</span></td>
+      <td>${escapeHtml(s.generation)}</td>
+      <td>${escapeHtml(s.depth)}</td>
+      <td>${escapeHtml(preview(s.data))}</td>
     `;
     rows.appendChild(tr);
   }
@@ -107,9 +112,9 @@ function linkButtons(ids) {
   if (!ids.length) return "<em>none</em>";
   return ids.map(id => {
     const known = BY_ID[id] !== undefined;
-    const label = id.slice(0, 8);
+    const label = escapeHtml(String(id).slice(0, 8));
     return known
-      ? `<button onclick="showDetail('${id}')">${label}</button>`
+      ? `<button class="sample-link" data-id="${escapeHtml(id)}">${label}</button>`
       : `<button disabled title="not in this snapshot">${label}</button>`;
   }).join(" ");
 }
@@ -136,8 +141,8 @@ function showDetail(id) {
   }
 
   detail.innerHTML = `
-    <h2>${s.id}</h2>
-    <div><b>status:</b> ${s.status} &nbsp; <b>generation:</b> ${s.generation} &nbsp; <b>depth:</b> ${s.depth}</div>
+    <h2>${escapeHtml(s.id)}</h2>
+    <div><b>status:</b> ${escapeHtml(s.status)} &nbsp; <b>generation:</b> ${escapeHtml(s.generation)} &nbsp; <b>depth:</b> ${escapeHtml(s.depth)}</div>
     ${promptBlock}
     ${solutionBlock}
     <div class="section-label">Data</div>
@@ -155,11 +160,17 @@ function escapeHtml(str) {
   return String(str)
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 }
 
 document.getElementById("gen-filter").addEventListener("change", renderTable);
 document.getElementById("status-filter").addEventListener("change", renderTable);
+document.getElementById("detail").addEventListener("click", (event) => {
+  const button = event.target.closest("button.sample-link");
+  if (button) showDetail(button.dataset.id);
+});
 populateFilters();
 renderTable();
 </script>
@@ -168,13 +179,27 @@ renderTable();
 """
 
 
+def _to_inline_script_json(samples: List[Dict[str, Any]]) -> str:
+    """Serialize `samples` as JSON safe to embed inside an inline `<script>` block.
+
+    Sample data is arbitrary (often LLM-generated) text, so characters that would let it
+    terminate the script element or break the surrounding JS string literal are emitted as
+    unicode escapes instead — they are equivalent JSON, but inert to the HTML parser.
+    """
+    return (
+        json.dumps(samples, default=str)
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+        .replace("\u2028", "\\u2028")
+        .replace("\u2029", "\\u2029")
+    )
+
+
 def render_population_html(samples: List[Dict[str, Any]]) -> str:
     """Render a self-contained HTML page for browsing `samples`.
 
     `samples` is the same list of per-sample dicts `_snapshot_population()` builds:
     id/data/status/generation/depth/parent_ids/child_ids/feedback.
     """
-    # `<` is escaped so sample data containing e.g. "</script>" cannot break out of the
-    # inline <script> block (JSON-escaped \u003c parses back to "<" in JS).
-    samples_json = json.dumps(samples, default=str).replace("<", "\\u003c")
-    return _TEMPLATE.replace(_SAMPLES_PLACEHOLDER, samples_json)
+    return _TEMPLATE.replace(_SAMPLES_PLACEHOLDER, _to_inline_script_json(samples))
