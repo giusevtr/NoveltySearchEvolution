@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import functools
 import tempfile
 
 import numpy as np
@@ -11,6 +12,7 @@ import pytest
 from novelty_search_evolution.evolution_engine import EvolutionEngine
 from novelty_search_evolution.population import Population
 from novelty_search_evolution.sample import Status
+from novelty_search_evolution.selection_engine import DefaultSelectionEngine
 
 
 def embedding_fn(data_list):
@@ -222,3 +224,56 @@ class TestLogging:
 
         for i in range(3):
             assert (tmp_path / f"generation_{i}_log.txt").exists()
+
+
+class TestFilterContract:
+    def test_judgement_count_mismatch_raises(self):
+        def short_filter(candidates):
+            return [{"accepted": True}]
+
+        pop, engine = make_engine(seeds=[0, 1, 2, 3], filters=[short_filter], selection_size=2)
+        with pytest.raises(ValueError, match="one judgement per candidate"):
+            engine.step()
+
+    def test_partial_filter_is_named_in_trace(self, tmp_path):
+        def reject_all(candidates, reason):
+            return [{"accepted": False, "feedback": reason} for _ in candidates]
+
+        filter_fn = functools.partial(reject_all, reason="nope")
+        pop, engine = make_engine(
+            seeds=[0, 1, 2, 3], filters=[filter_fn], selection_size=2, log_path=tmp_path
+        )
+        result = engine.step()
+        assert result.num_rejected == result.num_candidates
+        assert "reject_all" in (tmp_path / "generation_0_log.txt").read_text()
+
+
+class TestThinPopulation:
+    def test_step_survives_empty_active_population(self):
+        pop, engine = make_engine(seeds=[0, 1], num_mutation_samples=5, selection_size=2)
+        for s in pop.get_active():
+            s.set_inactive()
+        result = engine.step()
+        assert result.num_candidates == 0
+
+    def test_mutation_parents_are_distinct(self):
+        pop, engine = make_engine(seeds=[0, 1, 2, 3], num_mutation_samples=3)
+        parents = engine._select_mutation_parents()
+        assert len({p.get_id() for p in parents}) == 3
+
+
+class TestSelectionConfigReconfiguration:
+    def test_config_change_rebuilds_default_engine(self):
+        pop, engine = make_engine(seeds=[0, 1, 2, 3], selection_size=2)
+        engine.step()
+        assert engine._get_selection_engine().nn_k == 1
+
+        engine.set_selection_config({"nn-k": 3, "distance": "euclidean", "archive_update_prob": 0.0})
+        assert engine._get_selection_engine().nn_k == 3
+
+    def test_config_change_keeps_custom_engine(self):
+        pop, engine = make_engine(seeds=[0, 1, 2, 3], selection_size=2)
+        custom = DefaultSelectionEngine(pop, nn_k=2, distance="euclidean")
+        engine.set_selection_engine(custom)
+        engine.set_selection_config({"nn-k": 9, "distance": "euclidean"})
+        assert engine._get_selection_engine() is custom

@@ -17,8 +17,6 @@ Requires a CUDA GPU. No vLLM engine should be loaded on the same GPU while this 
 from __future__ import annotations
 
 import argparse
-import json
-import logging
 import math
 import os
 from pathlib import Path
@@ -31,17 +29,20 @@ from pydantic import BaseModel, Field
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from trl import SFTConfig, SFTTrainer
 
+from examples.gsm8k_distillation.common.files import cap_limit, read_json
+from examples.gsm8k_distillation.common.logging_utils import get_logger
+from examples.gsm8k_distillation.common.paths import CONFIG_DIR, GSM8K_VAL_PARQUET
 from examples.gsm8k_distillation.novelty_search.prompts import build_solve_prompt
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
-THIS_DIR = Path(__file__).parent
-DEFAULT_SFT_CONFIG_PATH = THIS_DIR / "configs" / "sft_config.json"
-DEFAULT_PEFT_CONFIG_PATH = THIS_DIR / "configs" / "peft_config.json"
-DEFAULT_EVAL_DATA_PATH = THIS_DIR / "data" / "gsm8k_val.parquet"
+DEFAULT_SFT_CONFIG_PATH = CONFIG_DIR / "sft_config.json"
+DEFAULT_PEFT_CONFIG_PATH = CONFIG_DIR / "peft_config.json"
+DEFAULT_EVAL_DATA_PATH = GSM8K_VAL_PARQUET
 
 EVALS_PER_EPOCH = 4
+SMOKE_TEST_NUM_SAMPLES = 8
+SMOKE_TEST_MAX_STEPS = 2
 
 _DTYPE_MAP = {
     "bfloat16": torch.bfloat16,
@@ -70,13 +71,6 @@ class PeftHyperparams(BaseModel):
     alpha: int = Field(default=32, ge=1)
     target_modules: list[str] = Field(default_factory=lambda: ["q_proj", "k_proj", "v_proj", "o_proj"])
     task_type: str = "CAUSAL_LM"
-
-
-def load_json(path: str | Path) -> dict:
-    path = Path(path)
-    if not path.exists():
-        raise FileNotFoundError(f"Config file not found: {path}")
-    return json.loads(path.read_text())
 
 
 def build_peft_config(cfg: PeftHyperparams) -> LoraConfig | None:
@@ -231,16 +225,16 @@ def main() -> None:
     parser.add_argument("--no-eval", action="store_true", help="Disable eval-during-training entirely.")
     args = parser.parse_args()
 
-    sft_cfg = SFTHyperparams(**load_json(args.sft_config))
-    peft_cfg = PeftHyperparams(**load_json(args.peft_config))
+    sft_cfg = SFTHyperparams(**read_json(args.sft_config))
+    peft_cfg = PeftHyperparams(**read_json(args.peft_config))
 
     max_samples = args.max_samples
     max_steps = None
     eval_max_samples = args.eval_max_samples
     if args.smoke_test:
-        max_samples = min(8, max_samples) if max_samples is not None else 8
-        max_steps = 2
-        eval_max_samples = min(8, eval_max_samples) if eval_max_samples is not None else 8
+        max_samples = cap_limit(max_samples, SMOKE_TEST_NUM_SAMPLES)
+        max_steps = SMOKE_TEST_MAX_STEPS
+        eval_max_samples = cap_limit(eval_max_samples, SMOKE_TEST_NUM_SAMPLES)
 
     train(
         data_path=args.data,

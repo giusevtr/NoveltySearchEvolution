@@ -34,25 +34,22 @@ from __future__ import annotations
 import sys
 import argparse
 import hashlib
-import json
-import logging
 from pathlib import Path
-sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 
+sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from scipy.spatial.distance import cdist, pdist
 from sklearn.manifold import TSNE
 
+from examples.gsm8k_distillation.common.files import load_frame, require_file, write_json
+from examples.gsm8k_distillation.common.logging_utils import get_logger
+from examples.gsm8k_distillation.common.paths import DATA_DIR, OUTPUT_DIR
+from examples.gsm8k_distillation.common.plots import save_figure
 from examples.gsm8k_distillation.novelty_search.embedding import question_embedding_fn
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
-
-THIS_DIR = Path(__file__).parent
-DATA_DIR = THIS_DIR / "data"
-OUTPUT_DIR = THIS_DIR / "output"
+logger = get_logger(__name__)
 
 DEFAULT_SYNTHETIC_DATA = OUTPUT_DIR / "synthetic_distillation.parquet"
 DEFAULT_NEMO_DATA = OUTPUT_DIR / "baseline_nemo_distillation.parquet"
@@ -66,13 +63,6 @@ SMOKE_TEST_NUM_SAMPLES = 20
 
 COMPONENTS = ("prompt", "teacher_annotation")
 _COMPONENT_COLUMNS = {"prompt": "question", "teacher_annotation": "teacher_completion"}
-
-
-def load_dataset(path: Path, n: int | None = None, random_state: int = 0) -> pd.DataFrame:
-    df = pd.read_parquet(path)
-    if n is not None and n < len(df):
-        df = df.sample(n=n, random_state=random_state)
-    return df.reset_index(drop=True)
 
 
 def embed(questions: list[str]) -> np.ndarray:
@@ -115,12 +105,17 @@ def embed_components(df: pd.DataFrame, tag: str, cache_dir: Path, refresh: bool 
 
 
 def compute_tsne_2d(embeddings: np.ndarray) -> np.ndarray:
-    perplexity = min(30, max(5, (len(embeddings) - 1) // 3))
+    if len(embeddings) < 3:
+        raise ValueError(f"t-SNE needs at least 3 points, got {len(embeddings)}")
+    # sklearn requires perplexity < n_samples
+    perplexity = min(30, max(1, (len(embeddings) - 1) // 3), len(embeddings) - 1)
     return TSNE(n_components=2, random_state=0, perplexity=perplexity).fit_transform(embeddings)
 
 
 def average_pairwise_distance(embeddings: np.ndarray) -> float:
     """Mean cosine distance over all pairs — higher means more internally diverse."""
+    if len(embeddings) < 2:
+        raise ValueError(f"need at least 2 embeddings to average pairwise distance, got {len(embeddings)}")
     return float(np.mean(pdist(embeddings, metric="cosine")))
 
 
@@ -128,6 +123,8 @@ def mean_min_distance_to_reference(embeddings: np.ndarray, reference_embeddings:
     """For each reference (ground-truth) embedding, the cosine distance to its nearest neighbor
     in `embeddings`, averaged over all reference embeddings — lower means every ground-truth
     point has some synthetic point nearby, i.e. better coverage of the reference distribution."""
+    if len(embeddings) == 0 or len(reference_embeddings) == 0:
+        raise ValueError("both embeddings and reference_embeddings must be non-empty")
     dists = cdist(reference_embeddings, embeddings, metric="cosine")
     return float(dists.min(axis=1).mean())
 
@@ -211,9 +208,7 @@ def plot_combined(
     fig.suptitle("Synthetic Question Diversity vs. Ground Truth (t-SNE of semantic embeddings)")
     fig.tight_layout()
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, dpi=120)
-    plt.close(fig)
+    save_figure(fig, output_path)
 
 
 def main() -> None:
@@ -237,34 +232,27 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not args.synthetic_data.exists():
-        logger.error("Missing %s — run run.py first to generate it.", args.synthetic_data)
-        raise SystemExit(1)
-    if not args.nemo_data.exists():
-        logger.error("Missing %s — run baseline_nemo.py first to generate it.", args.nemo_data)
-        raise SystemExit(1)
-    if not args.groundtruth_data.exists():
-        logger.error("Missing %s — run scripts/annotate_groundtruth.py first to generate it.", args.groundtruth_data)
-        raise SystemExit(1)
+    require_file(args.synthetic_data, "run run.py first to generate it.")
+    require_file(args.nemo_data, "run baseline_nemo.py first to generate it.")
+    require_file(args.groundtruth_data, "run scripts/annotate_groundtruth.py first to generate it.")
 
     num_groundtruth_samples = SMOKE_TEST_NUM_SAMPLES if args.smoke_test else args.num_groundtruth_samples
     num_synthetic_samples = SMOKE_TEST_NUM_SAMPLES if args.smoke_test else None
 
-    gt_df = load_dataset(args.groundtruth_data, n=num_groundtruth_samples)
+    gt_df = load_frame(args.groundtruth_data, n=num_groundtruth_samples)
     logger.info("Loaded %d ground-truth rows", len(gt_df))
     gt_embeds = embed_components(gt_df, tag="groundtruth", cache_dir=args.cache_dir, refresh=args.refresh_cache)
 
-    novelty_df = load_dataset(args.synthetic_data, n=num_synthetic_samples)
+    novelty_df = load_frame(args.synthetic_data, n=num_synthetic_samples)
     logger.info("Loaded %d novelty-search synthetic rows", len(novelty_df))
     novelty_embeds = embed_components(novelty_df, tag="novelty", cache_dir=args.cache_dir, refresh=args.refresh_cache)
 
-    nemo_df = load_dataset(args.nemo_data, n=num_synthetic_samples)
+    nemo_df = load_frame(args.nemo_data, n=num_synthetic_samples)
     logger.info("Loaded %d NeMo baseline synthetic rows", len(nemo_df))
     nemo_embeds = embed_components(nemo_df, tag="nemo", cache_dir=args.cache_dir, refresh=args.refresh_cache)
 
     metrics = compute_metrics(gt_embeds, novelty_embeds, nemo_embeds)
-    args.metrics_output.parent.mkdir(parents=True, exist_ok=True)
-    args.metrics_output.write_text(json.dumps(metrics, indent=2))
+    write_json(metrics, args.metrics_output)
     logger.info("Wrote diversity metrics to %s", args.metrics_output)
     print_metrics_summary(metrics)
 

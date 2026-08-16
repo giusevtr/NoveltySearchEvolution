@@ -6,6 +6,8 @@ Bedrock-hosted Qwen3-32B teacher used by run.py, instead of a separate NVIDIA-ho
 
 from __future__ import annotations
 
+from uuid import uuid4
+
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
@@ -26,7 +28,9 @@ class ChatMessage(BaseModel):
     def text(self) -> str:
         if isinstance(self.content, str):
             return self.content
-        return "".join(part.get("text", "") for part in self.content)
+        return "".join(
+            part["text"] for part in self.content if isinstance(part, dict) and isinstance(part.get("text"), str)
+        )
 
 
 class ChatCompletionRequest(BaseModel):
@@ -40,10 +44,10 @@ class ChatCompletionRequest(BaseModel):
 def chat_completions(req: ChatCompletionRequest) -> dict:
     prompt = next((m.text() for m in reversed(req.messages) if m.role == "user"), None)
     if not prompt:
-        raise HTTPException(status_code=400, detail="No non-empty user message in request")
+        raise HTTPException(status_code=400, detail="request contains no non-empty 'user' message")
     [completion] = _teacher.generate([prompt], max_tokens=req.max_tokens, temperature=req.temperature)
     return {
-        "id": "chatcmpl-teacher-proxy",
+        "id": f"chatcmpl-teacher-proxy-{uuid4().hex}",
         "object": "chat.completion",
         "model": req.model,
         "choices": [

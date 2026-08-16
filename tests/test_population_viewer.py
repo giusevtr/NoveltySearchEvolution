@@ -89,3 +89,20 @@ class TestRenderPopulationHtml:
         ]
         html = render_population_html(samples)
         assert "0.5" in html
+
+    def test_escapes_script_terminator_in_data(self):
+        samples = [
+            {
+                "id": "s1",
+                "data": "</script><h1>pwned</h1>",
+                "status": "active",
+                "generation": 0,
+                "depth": 0,
+                "parent_ids": [],
+                "child_ids": [],
+                "feedback": [],
+            }
+        ]
+        html = render_population_html(samples)
+        assert "</script><h1>" not in html
+        assert "\\u003c/script\\u003e" in html

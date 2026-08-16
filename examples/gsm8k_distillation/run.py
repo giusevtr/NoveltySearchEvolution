@@ -21,37 +21,40 @@ CUDA GPU for the colocated Qwen3-0.6B vLLM student.
 from __future__ import annotations
 import sys
 import argparse
-import logging
 import random
 from pathlib import Path
+from typing import Callable
 
 sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
 from examples.gsm8k_distillation.clients.student_client import StudentClient, StudentConfig
 from examples.gsm8k_distillation.clients.teacher_client import TeacherClient
+from examples.gsm8k_distillation.common.files import load_seed_questions
+from examples.gsm8k_distillation.common.inference import (
+    K_STUDENT_SAMPLES,
+    solve_and_score,
+    teacher_write_questions,
+)
+from examples.gsm8k_distillation.common.logging_utils import get_logger
+from examples.gsm8k_distillation.common.paths import GSM8K_TRAIN_PARQUET, LOG_DIR, OUTPUT_DIR
+from examples.gsm8k_distillation.common.plots import plot_difficulty_histogram
 from examples.gsm8k_distillation.novelty_search.embedding import combine_embeddings, question_embedding_fn
 from examples.gsm8k_distillation.novelty_search.prompts import (
     TOPICS,
-    answers_match,
     build_crossover_prompt,
     build_mutation_prompt,
-    build_solve_prompt,
     extract_gsm8k_answer,
-    extract_question,
 )
 
 from novelty_search_evolution import EvolutionEngine, EvoSample, Population
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # --- config ---
 
 NUM_SEEDS = 5
-K_STUDENT_SAMPLES = 10  # difficulty label range: [0, K_STUDENT_SAMPLES]
 MIN_SAMPLES_PER_BUCKET = 50
 MAX_GENERATIONS_SAFETY_CAP = 300
 
@@ -67,16 +70,9 @@ SELECTION_CONFIG = {
     "archive_update_prob": 0.3,
 }
 
-DATA_DIR = Path(__file__).parent / "data"
-OUTPUT_DIR = Path(__file__).parent / "output"
-LOG_DIR = Path(__file__).parent / "logs"
 CHECKPOINT_EVERY_N_GENERATIONS = 10
-
-_MUTATION_TEMPERATURE = 0.9
-_TEACHER_SOLVE_TEMPERATURE = 0.7
-_STUDENT_SOLVE_TEMPERATURE = 0.8
-_MUTATION_MAX_TOKENS = 256
-_SOLVE_MAX_TOKENS = 512
+SYNTHETIC_DATA_PATH = OUTPUT_DIR / "synthetic_distillation.parquet"
+DIFFICULTY_PLOT_PATH = OUTPUT_DIR / "difficulty_distribution.png"
 
 
 # --- data assembly ---
@@ -103,28 +99,9 @@ def _assemble_dict(
     }
 
 
-def score_difficulty(student: StudentClient, questions: list[str], teacher_answers: list[str | None]) -> list[int]:
-    """For each question, sample K student completions and count matches vs the teacher answer."""
-    prompts = [build_solve_prompt(q) for q in questions]
-    student_completions = student.generate(
-        prompts, n=K_STUDENT_SAMPLES, temperature=_STUDENT_SOLVE_TEMPERATURE, max_tokens=_SOLVE_MAX_TOKENS
-    )
-    difficulties = []
-    for completions, teacher_answer in zip(student_completions, teacher_answers):
-        matches = sum(1 for c in completions if answers_match(extract_gsm8k_answer(c), teacher_answer))
-        difficulties.append(matches)
-    return difficulties
-
-
 def load_seeds(teacher: TeacherClient, student: StudentClient, n: int, random_state: int = 0) -> list[dict]:
-    df = pd.read_parquet(DATA_DIR / "gsm8k_train.parquet")
-    seed_questions = df["prompt"].sample(n=n, random_state=random_state).tolist()
-
-    teacher_completions = teacher.generate(
-        [build_solve_prompt(q) for q in seed_questions], max_tokens=_SOLVE_MAX_TOKENS, temperature=_TEACHER_SOLVE_TEMPERATURE
-    )
-    teacher_answers = [extract_gsm8k_answer(c) for c in teacher_completions]
-    difficulties = score_difficulty(student, seed_questions, teacher_answers)
+    seed_questions = load_seed_questions(GSM8K_TRAIN_PARQUET, n=n, random_state=random_state)
+    teacher_completions, difficulties = solve_and_score(teacher, student, seed_questions)
 
     return [
         _assemble_dict(q, c, d, source="seed", parent_question=None, topic=None)
@@ -135,24 +112,48 @@ def load_seeds(teacher: TeacherClient, student: StudentClient, n: int, random_st
 # --- evolution operators ---
 
 
+def _breed(
+    teacher: TeacherClient,
+    student: StudentClient,
+    build_prompt: Callable[[str], str],
+    topics: list[str],
+    source: str,
+    parent_question: str,
+    parent_question_2: str | None = None,
+) -> list[dict]:
+    """Ask the teacher for one new question per topic, then solve and difficulty-score each."""
+    new_questions = teacher_write_questions(teacher, [build_prompt(topic) for topic in topics])
+    teacher_completions, difficulties = solve_and_score(teacher, student, new_questions)
+
+    return [
+        _assemble_dict(
+            q,
+            c,
+            d,
+            source=source,
+            parent_question=parent_question,
+            parent_question_2=parent_question_2,
+            topic=topic,
+        )
+        for q, c, d, topic in zip(new_questions, teacher_completions, difficulties, topics)
+    ]
+
+
+def _random_topics(n: int) -> list[str]:
+    return [random.choice(TOPICS) for _ in range(n)]
+
+
 def make_mut_fn(teacher: TeacherClient, student: StudentClient, mutations_per_parent: int):
     def mut_fn(parent: EvoSample) -> list[dict]:
         parent_q = parent.get_data()["question"]
-        topics = [random.choice(TOPICS) for _ in range(mutations_per_parent)]
-        mutation_prompts = [build_mutation_prompt(parent_q, topic) for topic in topics]
-        raw_questions = teacher.generate(mutation_prompts, max_tokens=_MUTATION_MAX_TOKENS, temperature=_MUTATION_TEMPERATURE)
-        new_questions = [extract_question(q) for q in raw_questions]
-
-        teacher_completions = teacher.generate(
-            [build_solve_prompt(q) for q in new_questions], max_tokens=_SOLVE_MAX_TOKENS, temperature=_TEACHER_SOLVE_TEMPERATURE
+        return _breed(
+            teacher,
+            student,
+            lambda topic: build_mutation_prompt(parent_q, topic),
+            _random_topics(mutations_per_parent),
+            source="mutation",
+            parent_question=parent_q,
         )
-        teacher_answers = [extract_gsm8k_answer(c) for c in teacher_completions]
-        difficulties = score_difficulty(student, new_questions, teacher_answers)
-
-        return [
-            _assemble_dict(q, c, d, source="mutation", parent_question=parent_q, topic=topic)
-            for q, c, d, topic in zip(new_questions, teacher_completions, difficulties, topics)
-        ]
 
     return mut_fn
 
@@ -161,21 +162,15 @@ def make_crossover_fn(teacher: TeacherClient, student: StudentClient, children_p
     def crossover_fn(parent_1: EvoSample, parent_2: EvoSample) -> list[dict]:
         q1 = parent_1.get_data()["question"]
         q2 = parent_2.get_data()["question"]
-        topics = [random.choice(TOPICS) for _ in range(children_per_pair)]
-        crossover_prompts = [build_crossover_prompt(q1, q2, topic) for topic in topics]
-        raw_questions = teacher.generate(crossover_prompts, max_tokens=_MUTATION_MAX_TOKENS, temperature=_MUTATION_TEMPERATURE)
-        new_questions = [extract_question(q) for q in raw_questions]
-
-        teacher_completions = teacher.generate(
-            [build_solve_prompt(q) for q in new_questions], max_tokens=_SOLVE_MAX_TOKENS, temperature=_TEACHER_SOLVE_TEMPERATURE
+        return _breed(
+            teacher,
+            student,
+            lambda topic: build_crossover_prompt(q1, q2, topic),
+            _random_topics(children_per_pair),
+            source="crossover",
+            parent_question=q1,
+            parent_question_2=q2,
         )
-        teacher_answers = [extract_gsm8k_answer(c) for c in teacher_completions]
-        difficulties = score_difficulty(student, new_questions, teacher_answers)
-
-        return [
-            _assemble_dict(q, c, d, source="crossover", parent_question=q1, parent_question_2=q2, topic=topic)
-            for q, c, d, topic in zip(new_questions, teacher_completions, difficulties, topics)
-        ]
 
     return crossover_fn
 
@@ -201,8 +196,14 @@ def embedding_fn(data_list: list[dict]) -> list[np.ndarray]:
 # --- stopping condition ---
 
 
+def kept_samples(population: Population) -> list[EvoSample]:
+    """Archived ∪ active samples, de-duplicated: a sample can be both at once."""
+    by_id = {s.get_id(): s for s in population.get_archive() + population.get_active()}
+    return list(by_id.values())
+
+
 def bucket_counts(population: Population) -> np.ndarray:
-    samples = population.get_archive() + population.get_active()
+    samples = kept_samples(population)
     counts = np.zeros(K_STUDENT_SAMPLES + 1, dtype=int)
     for s in samples:
         counts[s.get_data()["difficulty"]] += 1
@@ -236,31 +237,29 @@ def run_evolution(population: Population, engine: EvolutionEngine, min_per_bucke
 
 
 def checkpoint_synthetic_arm(population: Population, generation: int) -> None:
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    frame = synthetic_arm_dataframe(population)
-    frame.to_parquet(OUTPUT_DIR / "synthetic_distillation.parquet")
+    frame = write_synthetic_arm(population)
     logger.info("checkpointed %d synthetic samples after generation %d", len(frame), generation)
 
 
 def synthetic_arm_dataframe(population: Population) -> pd.DataFrame:
-    samples = population.get_archive() + population.get_active()
-    rows = [s.get_data() for s in samples]
+    rows = [s.get_data() for s in kept_samples(population)]
     return pd.DataFrame(rows)
 
 
-def plot_difficulty_distribution(population: Population) -> None:
-    counts = bucket_counts(population)
-    fig, ax = plt.subplots(figsize=(7, 4))
-    ax.bar(range(K_STUDENT_SAMPLES + 1), counts)
-    ax.axhline(MIN_SAMPLES_PER_BUCKET, color="red", linestyle="--", linewidth=1, label=f"target ({MIN_SAMPLES_PER_BUCKET})")
-    ax.set_xlabel("difficulty (# of K student successes)")
-    ax.set_ylabel("sample count")
-    ax.set_title("Synthetic dataset difficulty distribution")
-    ax.legend()
+def write_synthetic_arm(population: Population) -> pd.DataFrame:
+    frame = synthetic_arm_dataframe(population)
+    SYNTHETIC_DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
+    frame.to_parquet(SYNTHETIC_DATA_PATH)
+    return frame
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    fig.savefig(OUTPUT_DIR / "difficulty_distribution.png", dpi=120)
-    plt.close(fig)
+
+def plot_difficulty_distribution(population: Population) -> None:
+    plot_difficulty_histogram(
+        bucket_counts(population),
+        title="Synthetic dataset difficulty distribution",
+        output_path=DIFFICULTY_PLOT_PATH,
+        target=MIN_SAMPLES_PER_BUCKET,
+    )
 
 
 # --- main ---
@@ -302,13 +301,11 @@ def main(smoke_test: bool = False) -> None:
         bucket_counts(population).tolist(),
     )
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    synthetic_frame = synthetic_arm_dataframe(population)
-    synthetic_frame.to_parquet(OUTPUT_DIR / "synthetic_distillation.parquet")
-    logger.info("Wrote %d synthetic samples to %s", len(synthetic_frame), OUTPUT_DIR / "synthetic_distillation.parquet")
+    synthetic_frame = write_synthetic_arm(population)
+    logger.info("Wrote %d synthetic samples to %s", len(synthetic_frame), SYNTHETIC_DATA_PATH)
 
     plot_difficulty_distribution(population)
-    logger.info("Wrote difficulty distribution plot to %s", OUTPUT_DIR / "difficulty_distribution.png")
+    logger.info("Wrote difficulty distribution plot to %s", DIFFICULTY_PLOT_PATH)
 
 
 if __name__ == "__main__":
