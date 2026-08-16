@@ -42,6 +42,8 @@ def difficulty_one_hot(difficulties: list[int], k: int) -> np.ndarray:
     """One-hot encode difficulty labels in [0, k] into (N, k+1) unit-norm rows."""
     one_hot = np.zeros((len(difficulties), k + 1), dtype=np.float64)
     for i, d in enumerate(difficulties):
+        if not 0 <= d <= k:
+            raise ValueError(f"difficulty {d} at index {i} is outside the valid range [0, {k}]")
         one_hot[i, d] = 1.0
     return one_hot
 
@@ -62,6 +64,11 @@ def combine_embeddings(
         List of N combined embedding vectors, each
         [question_block (unit-norm), completion_block (unit-norm), difficulty_block (unit-norm)].
     """
+    if len(sem_vecs) != len(difficulties) or len(completion_vecs) != len(difficulties):
+        raise ValueError(
+            f"row count mismatch: {len(sem_vecs)} question vectors, "
+            f"{len(completion_vecs)} completion vectors, {len(difficulties)} difficulties"
+        )
     diff_blocks = difficulty_one_hot(difficulties, k)
     embeddings = []
     for i in range(len(difficulties)):

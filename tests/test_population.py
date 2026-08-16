@@ -225,7 +225,6 @@ class TestSampleRandom:
             s.set_active()
         result = pop.sample_random(10, status=Status.ACTIVE)
         assert len(result) == 2
-
     def test_sample_random_without_status_uses_whole_population(self):
         pop = Population()
         samples = [EvoSample(data=i) for i in range(4)]
@@ -235,6 +234,15 @@ class TestSampleRandom:
         result = pop.sample_random(3)
         assert len(result) == 3
         assert all(s in samples for s in result)
+
+    def test_sample_random_returns_distinct_samples(self):
+        pop = Population()
+        samples = [EvoSample(data=i) for i in range(5)]
+        pop.bulk_add(samples)
+        for s in samples:
+            s.set_active()
+        result = pop.sample_random(4, status=Status.ACTIVE)
+        assert len({s.get_id() for s in result}) == 4
 
     def test_sample_random_empty_pool_returns_empty(self):
         pop = Population()
@@ -262,7 +270,7 @@ class TestEmbeddingValidation:
 
     def test_too_few_embeddings_raises(self):
         pop, samples = self._pop_with(lambda data: [np.array([1.0])])
-        with pytest.raises(ValueError, match="expected exactly one per sample"):
+        with pytest.raises(ValueError, match="one embedding per input"):
             pop.compute_embeddings(samples)
 
     def test_non_1d_embedding_raises(self):

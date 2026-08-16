@@ -8,8 +8,8 @@ semantic/reasoning/difficulty novelty signal, and distill a Qwen3-0.6B student o
 three size-matched arms: novelty-search synthetic, real ground truth, and a NeMo Data
 Designer flat-synthetic baseline. Ground truth still closes the most gap (27.1%), but
 novelty search (26.5%) is close behind and closes noticeably more of the gap than the
-flat synthetic baseline (22.2%). Also Novelty Search evolution actives better diversity metrics. 
-Novelty search's question and reasoning embeddings cover the ground-truth distribution more closely 
+flat synthetic baseline (22.2%). Also, novelty search evolution achieves better diversity metrics:
+Novelty search's question and reasoning embeddings cover the ground-truth distribution more closely
 (lower mean nearest-neighbor distance) than the flat baseline's on both axes.
 
 ## 1. Research questions

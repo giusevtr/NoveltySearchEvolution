@@ -17,25 +17,22 @@ student mode requires a CUDA GPU; teacher mode requires AWS Bedrock credentials.
 from __future__ import annotations
 
 import argparse
-import json
-import logging
 from pathlib import Path
 
 import pandas as pd
 
 from examples.gsm8k_distillation.clients.student_client import StudentClient, StudentConfig
 from examples.gsm8k_distillation.clients.teacher_client import TeacherClient
-from examples.gsm8k_distillation.novelty_search.prompts import answers_match, build_solve_prompt, extract_gsm8k_answer
+from examples.gsm8k_distillation.common.files import cap_limit, load_frame, write_json
+from examples.gsm8k_distillation.common.inference import student_solve, teacher_solve
+from examples.gsm8k_distillation.common.logging_utils import get_logger
+from examples.gsm8k_distillation.common.paths import GSM8K_VAL_PARQUET, OUTPUT_DIR
+from examples.gsm8k_distillation.novelty_search.prompts import answers_match, extract_gsm8k_answer
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
-THIS_DIR = Path(__file__).parent
-DEFAULT_DATA_PATH = THIS_DIR / "data" / "gsm8k_val.parquet"
-
-_STUDENT_TEMPERATURE = 0.8
-_TEACHER_TEMPERATURE = 0.7
-_MAX_TOKENS = 512
+DEFAULT_DATA_PATH = GSM8K_VAL_PARQUET
+SMOKE_TEST_NUM_QUESTIONS = 4
 
 
 class ParsingErrorCounter:
@@ -52,14 +49,12 @@ class ParsingErrorCounter:
 def generate_student(questions: list[str], k: int, lora_path: str | None) -> list[list[str]]:
     student = StudentClient(StudentConfig(lora_path=lora_path))
     student.load()
-    prompts = [build_solve_prompt(q) for q in questions]
-    return student.generate(prompts, n=k, temperature=_STUDENT_TEMPERATURE, max_tokens=_MAX_TOKENS)
+    return student_solve(student, questions, n=k)
 
 
 def generate_teacher(questions: list[str], k: int) -> list[list[str]]:
     teacher = TeacherClient()
-    prompts = [build_solve_prompt(q) for q in questions]
-    per_repeat = [teacher.generate(prompts, max_tokens=_MAX_TOKENS, temperature=_TEACHER_TEMPERATURE) for _ in range(k)]
+    per_repeat = [teacher_solve(teacher, questions) for _ in range(k)]
     return [[per_repeat[r][i] for r in range(k)] for i in range(len(questions))]
 
 
@@ -117,10 +112,8 @@ def main() -> None:
     if args.mode == "teacher" and args.lora_path is not None:
         parser.error("--lora-path is not valid with --mode teacher")
 
-    df = pd.read_parquet(args.data)
-    limit = args.limit
-    if args.smoke_test:
-        limit = min(4, limit) if limit is not None else 4
+    limit = cap_limit(args.limit, SMOKE_TEST_NUM_QUESTIONS) if args.smoke_test else args.limit
+    df = load_frame(args.data)
     if limit is not None:
         df = df.head(limit)
 
@@ -129,13 +122,13 @@ def main() -> None:
     error_counter = ParsingErrorCounter()
     annotated = evaluate(df, args.k, args.mode, args.lora_path, error_counter)
 
-    output_dir = args.output_dir or (THIS_DIR / "output" / "eval" / args.run_name)
+    output_dir = args.output_dir or (OUTPUT_DIR / "eval" / args.run_name)
     output_dir.mkdir(parents=True, exist_ok=True)
     annotated.to_json(output_dir / "annotated.jsonl", orient="records", lines=True)
 
     model = StudentConfig().name if args.mode == "student" else "teacher (Bedrock)"
     report = build_report(annotated, args.k, error_counter, args.mode, model, args.lora_path, args.run_name)
-    (output_dir / "report.json").write_text(json.dumps(report, indent=2))
+    write_json(report, output_dir / "report.json")
 
     logger.info(
         "mean_correctness_rate=%.3f pass_at_%d_rate=%.3f parsing_error_rate=%.3f",

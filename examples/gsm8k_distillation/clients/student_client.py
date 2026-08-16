@@ -89,4 +89,9 @@ class StudentClient:
         chat_prompts = [self.format_chat_prompt(p) for p in prompts]
         params = SamplingParams(n=n, temperature=temperature, max_tokens=max_tokens)
         outputs = self._llm.generate(chat_prompts, params, lora_request=self._lora_request)
+        if len(outputs) != len(chat_prompts):
+            raise RuntimeError(
+                f"vLLM returned {len(outputs)} results for {len(chat_prompts)} prompts; "
+                "results can no longer be aligned with their questions"
+            )
         return [[completion.text for completion in out.outputs] for out in outputs]

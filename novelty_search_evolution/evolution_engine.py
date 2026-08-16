@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import functools
+import inspect
 import json
 import random
 from collections.abc import Iterable, Mapping
@@ -20,7 +22,12 @@ FilterFn = Callable[[List[EvoSample]], List[Dict[str, Any]]]
 
 
 def _fn_name(fn: Callable[..., Any]) -> str:
-    return getattr(fn, "__name__", type(fn).__name__)
+    """Name for any callable: plain function/method, functools.partial, or callable object."""
+    if isinstance(fn, functools.partial):
+        return _fn_name(fn.func)
+    if inspect.isfunction(fn) or inspect.ismethod(fn) or isinstance(fn, type):
+        return fn.__name__
+    return type(fn).__name__
 
 
 def _as_candidate_list(raw: Any, fn: Callable[..., Any], role: str) -> List[Any]:
@@ -48,8 +55,8 @@ def _as_judgement_list(
     judgements = list(raw)
     if len(judgements) != len(candidates):
         raise ValueError(
-            f"filter {name} returned {len(judgements)} judgements for "
-            f"{len(candidates)} candidates; expected exactly one per candidate"
+            f"filter {name} returned {len(judgements)} judgements for {len(candidates)} "
+            "candidates; it must return one judgement per candidate, in the same order"
         )
     for index, judgement in enumerate(judgements):
         if not isinstance(judgement, Mapping):
@@ -105,6 +112,7 @@ class EvolutionEngine:
         self._filter_fns: List[FilterFn] = []
         self._selection_config: Dict[str, Any] = {}
         self._selection_engine: Optional[SelectionEngine] = None
+        self._selection_engine_is_default = False
 
     # --- setup ---
 
@@ -121,9 +129,14 @@ class EvolutionEngine:
 
     def set_selection_config(self, config: Dict[str, Any]) -> None:
         self._selection_config = config
+        # drop the memoized default engine so nn-k / distance changes take effect mid-run
+        if self._selection_engine_is_default:
+            self._selection_engine = None
+            self._selection_engine_is_default = False
 
     def set_selection_engine(self, engine: SelectionEngine) -> None:
         self._selection_engine = engine
+        self._selection_engine_is_default = False
 
     def _get_selection_engine(self) -> SelectionEngine:
         if self._selection_engine is None:
@@ -132,9 +145,10 @@ class EvolutionEngine:
                     "selection config is missing 'nn-k' — call set_selection_config({'nn-k': ...}) "
                     "or provide a custom engine via set_selection_engine()"
                 )
+            self._selection_engine_is_default = True
             self._selection_engine = DefaultSelectionEngine(
                 self.population,
-                nn_k=self._selection_config["nn-k"],
+                nn_k=self._selection_config.get("nn-k", 1),
                 distance=self._selection_config.get("distance", "cosine"),
             )
         return self._selection_engine

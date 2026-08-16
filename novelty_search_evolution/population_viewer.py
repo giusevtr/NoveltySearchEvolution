@@ -174,5 +174,7 @@ def render_population_html(samples: List[Dict[str, Any]]) -> str:
     `samples` is the same list of per-sample dicts `_snapshot_population()` builds:
     id/data/status/generation/depth/parent_ids/child_ids/feedback.
     """
-    samples_json = json.dumps(samples, default=str)
+    # `<` is escaped so sample data containing e.g. "</script>" cannot break out of the
+    # inline <script> block (JSON-escaped \u003c parses back to "<" in JS).
+    samples_json = json.dumps(samples, default=str).replace("<", "\\u003c")
     return _TEMPLATE.replace(_SAMPLES_PLACEHOLDER, samples_json)
