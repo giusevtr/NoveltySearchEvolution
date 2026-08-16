@@ -53,6 +53,11 @@ def score(
     else:
         if reference.ndim != 2:
             raise ValueError(f"reference must be 2-dimensional, got shape {reference.shape}")
+        if reference.shape[0] and reference.shape[1] != X.shape[1]:
+            raise ValueError(
+                f"X has {X.shape[1]} features but reference has {reference.shape[1]}; "
+                "embeddings must share a single fixed length"
+            )
         dists = cdist(X, reference, metric=distance)
         pool_size = reference.shape[0]
 

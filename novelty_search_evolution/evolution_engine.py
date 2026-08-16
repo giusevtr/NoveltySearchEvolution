@@ -6,6 +6,7 @@ import functools
 import inspect
 import json
 import random
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -27,6 +28,48 @@ def _fn_name(fn: Callable[..., Any]) -> str:
     if inspect.isfunction(fn) or inspect.ismethod(fn) or isinstance(fn, type):
         return fn.__name__
     return type(fn).__name__
+
+
+def _as_candidate_list(raw: Any, fn: Callable[..., Any], role: str) -> List[Any]:
+    """Validate that a user-supplied `mut_fn`/`crossover_fn` returned a list of data values."""
+    if isinstance(raw, (str, bytes, Mapping)) or not isinstance(raw, Iterable):
+        raise TypeError(
+            f"{role} {_fn_name(fn)} must return a list of candidate data values, "
+            f"got {type(raw).__name__}"
+        )
+    return list(raw)
+
+
+def _as_judgement_list(
+    raw: Any, filter_fn: FilterFn, candidates: List[EvoSample]
+) -> List[Mapping[str, Any]]:
+    """Validate a filter's output: exactly one judgement mapping with an `accepted` key per
+    candidate. Without this check a short/misshapen result silently leaves candidates
+    unjudged (implicitly accepted) or rejects them without a reason.
+    """
+    name = _fn_name(filter_fn)
+    if isinstance(raw, (str, bytes, Mapping)) or not isinstance(raw, Iterable):
+        raise TypeError(
+            f"filter {name} must return a list of judgement dicts, got {type(raw).__name__}"
+        )
+    judgements = list(raw)
+    if len(judgements) != len(candidates):
+        raise ValueError(
+            f"filter {name} returned {len(judgements)} judgements for {len(candidates)} "
+            "candidates; it must return one judgement per candidate, in the same order"
+        )
+    for index, judgement in enumerate(judgements):
+        if not isinstance(judgement, Mapping):
+            raise TypeError(
+                f"filter {name} judgement at index {index} must be a dict, "
+                f"got {type(judgement).__name__}"
+            )
+        if "accepted" not in judgement:
+            raise ValueError(
+                f"filter {name} judgement at index {index} is missing the required "
+                f"'accepted' key (keys: {sorted(judgement)})"
+            )
+    return judgements
 
 
 def _default_log_dir() -> Path:
@@ -97,6 +140,11 @@ class EvolutionEngine:
 
     def _get_selection_engine(self) -> SelectionEngine:
         if self._selection_engine is None:
+            if "nn-k" not in self._selection_config:
+                raise ValueError(
+                    "selection config is missing 'nn-k' — call set_selection_config({'nn-k': ...}) "
+                    "or provide a custom engine via set_selection_engine()"
+                )
             self._selection_engine_is_default = True
             self._selection_engine = DefaultSelectionEngine(
                 self.population,
@@ -147,14 +195,16 @@ class EvolutionEngine:
         candidates: List[EvoSample] = []
         if mut_fn is not None:
             for parent in mutation_parents:
-                for raw in mut_fn(parent):
+                for raw in _as_candidate_list(mut_fn(parent), mut_fn, "mut_fn"):
                     candidate = EvoSample(data=raw, parents=[parent], generation=generation)
                     parent._add_child(candidate)
                     candidates.append(candidate)
                     trace.append(f"mutation: {parent.get_id()} -> {candidate.get_id()}")
         if crossover_fn is not None:
             for p1, p2 in crossover_pairs:
-                for raw in crossover_fn(p1, p2):
+                for raw in _as_candidate_list(
+                    crossover_fn(p1, p2), crossover_fn, "crossover_fn"
+                ):
                     candidate = EvoSample(data=raw, parents=[p1, p2], generation=generation)
                     p1._add_child(candidate)
                     p2._add_child(candidate)
@@ -171,16 +221,10 @@ class EvolutionEngine:
             if not unrejected:
                 trace.append(f"filter {_fn_name(filter_fn)}: skipped (no unrejected candidates)")
                 break
-            judgements = filter_fn(unrejected)
-            if len(judgements) != len(unrejected):
-                raise ValueError(
-                    f"filter {_fn_name(filter_fn)} returned {len(judgements)} judgements for "
-                    f"{len(unrejected)} candidates; it must return one judgement per candidate, "
-                    "in the same order"
-                )
+            judgements = _as_judgement_list(filter_fn(unrejected), filter_fn, unrejected)
             num_rejected_by_filter = 0
             for candidate, judgement in zip(unrejected, judgements):
-                if not judgement.get("accepted", False):
+                if not judgement["accepted"]:
                     candidate.set_reject(feedback=judgement.get("feedback") or None)
                     num_rejected_by_filter += 1
                     trace.append(

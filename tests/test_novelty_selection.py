@@ -52,6 +52,22 @@ class TestInvalidDistance:
             novelty_selection.score(X, k=1, distance="manhattan", reference=None)
 
 
+class TestInvalidInputs:
+    def test_mismatched_reference_dimension_raises(self):
+        X = np.array([[0.0, 0.0]])
+        with pytest.raises(ValueError, match="features"):
+            novelty_selection.score(X, k=1, distance="euclidean", reference=np.zeros((2, 3)))
+
+    def test_non_2d_X_raises(self):
+        with pytest.raises(ValueError, match="2-dimensional"):
+            novelty_selection.score(np.array([1.0, 2.0]), k=1, distance="euclidean")
+
+    def test_zero_reference_row_with_cosine_raises(self):
+        X = np.array([[1.0, 1.0]])
+        with pytest.raises(ValueError, match="zero-norm"):
+            novelty_selection.score(X, k=1, distance="cosine", reference=np.zeros((1, 2)))
+
+
 class TestDegenerateInputs:
     def test_single_row_without_reference_scores_zero(self):
         X = np.array([[1.0, 0.0]])

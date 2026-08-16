@@ -226,6 +226,52 @@ class TestLogging:
             assert (tmp_path / f"generation_{i}_log.txt").exists()
 
 
+class TestCallbackContractValidation:
+    def test_mut_fn_returning_none_raises(self):
+        pop, engine = make_engine(seeds=[0, 1, 2, 3])
+        engine.set_mutation(lambda parent: None, num_mutation_samples=1)
+        with pytest.raises(TypeError, match="mut_fn"):
+            engine.step()
+
+    def test_crossover_fn_returning_scalar_raises(self):
+        pop, engine = make_engine(seeds=[0, 1, 2, 3], num_crossover_samples=1)
+        engine.set_mutation(lambda parent: [], num_mutation_samples=0)
+        engine.set_crossover(lambda p1, p2: 5, num_crossover_samples=1)
+        with pytest.raises(TypeError, match="crossover_fn"):
+            engine.step()
+
+    def test_filter_judgement_missing_accepted_key_raises(self):
+        def typo_filter(candidates):
+            return [{"acepted": True} for _ in candidates]
+
+        pop, engine = make_engine(seeds=[0, 1, 2, 3], filters=[typo_filter])
+        with pytest.raises(ValueError, match="'accepted' key"):
+            engine.step()
+
+    def test_filter_returning_non_mapping_judgement_raises(self):
+        def bad_filter(candidates):
+            return [True for _ in candidates]
+
+        pop, engine = make_engine(seeds=[0, 1, 2, 3], filters=[bad_filter])
+        with pytest.raises(TypeError, match="must be a dict"):
+            engine.step()
+
+    def test_callable_filter_object_is_named_in_errors(self):
+        class RejectAll:
+            def __call__(self, candidates):
+                return []
+
+        pop, engine = make_engine(seeds=[0, 1, 2, 3], filters=[RejectAll()])
+        with pytest.raises(ValueError, match="RejectAll"):
+            engine.step()
+
+    def test_missing_nn_k_raises_explanatory_error(self):
+        pop, engine = make_engine(seeds=[0, 1, 2, 3])
+        engine.set_selection_config({"distance": "euclidean", "archive_update_prob": 0.0})
+        with pytest.raises(ValueError, match="nn-k"):
+            engine.step()
+
+
 class TestFilterContract:
     def test_judgement_count_mismatch_raises(self):
         def short_filter(candidates):

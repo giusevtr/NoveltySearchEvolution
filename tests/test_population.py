@@ -254,12 +254,51 @@ class TestSampleRandom:
         pop.set_seeds([1, 2])
         assert pop.sample_random(0, status=Status.ACTIVE) == []
 
-
-class TestComputeEmbeddingsValidation:
-    def test_embedding_fn_returning_wrong_count_raises(self):
+    def test_sample_random_negative_k_raises(self):
         pop = Population()
-        pop.set_embedding_column(lambda data_list: [np.array([1.0])])
-        samples = [EvoSample(data=i) for i in range(3)]
+        with pytest.raises(ValueError, match="non-negative"):
+            pop.sample_random(-1)
+
+
+class TestEmbeddingValidation:
+    def _pop_with(self, embedding_fn, num_samples=2):
+        pop = Population()
+        pop.set_embedding_column(embedding_fn)
+        samples = [EvoSample(data=i) for i in range(num_samples)]
         pop.bulk_add(samples)
+        return pop, samples
+
+    def test_too_few_embeddings_raises(self):
+        pop, samples = self._pop_with(lambda data: [np.array([1.0])])
         with pytest.raises(ValueError, match="one embedding per input"):
             pop.compute_embeddings(samples)
+
+    def test_non_1d_embedding_raises(self):
+        pop, samples = self._pop_with(lambda data: [np.zeros((2, 2)) for _ in data])
+        with pytest.raises(ValueError, match="1-D vector"):
+            pop.compute_embeddings(samples)
+
+    def test_empty_embedding_raises(self):
+        pop, samples = self._pop_with(lambda data: [np.array([]) for _ in data])
+        with pytest.raises(ValueError, match="empty embedding"):
+            pop.compute_embeddings(samples)
+
+    def test_nan_embedding_raises(self):
+        pop, samples = self._pop_with(lambda data: [np.array([np.nan]) for _ in data])
+        with pytest.raises(ValueError, match="non-finite"):
+            pop.compute_embeddings(samples)
+
+    def test_non_numeric_embedding_raises(self):
+        pop, samples = self._pop_with(lambda data: [object() for _ in data])
+        with pytest.raises(TypeError, match="non-numeric"):
+            pop.compute_embeddings(samples)
+
+    def test_inconsistent_embedding_dimensions_raise(self):
+        pop, samples = self._pop_with(lambda data: [np.zeros(len(data) + i) for i, _ in enumerate(data)])
+        with pytest.raises(ValueError, match="inconsistent dimensions"):
+            pop.get_embeddings(samples)
+
+    def test_missing_sample_id_raises_keyerror(self):
+        pop = Population()
+        with pytest.raises(KeyError, match="No sample with id"):
+            pop.get_by_id("nope")
