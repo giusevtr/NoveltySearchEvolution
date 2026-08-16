@@ -17,24 +17,26 @@ sys.path.append(str(Path(__file__).resolve().parent.parent.parent.parent))
 import pandas as pd
 
 from examples.gsm8k_distillation.clients.teacher_client import TeacherClient
-from examples.gsm8k_distillation.novelty_search.prompts import build_solve_prompt, extract_gsm8k_answer
+from examples.gsm8k_distillation.common.files import cap_limit, load_frame, write_frame
+from examples.gsm8k_distillation.common.inference import teacher_solve
+from examples.gsm8k_distillation.common.paths import DATA_DIR
+from examples.gsm8k_distillation.novelty_search.prompts import extract_gsm8k_answer
 
-THIS_DIR = Path(__file__).parent
-DEFAULT_DATA_PATH = THIS_DIR.parent / "data" / "gsm8k_train.jsonl"
-DEFAULT_OUTPUT_DIR = THIS_DIR.parent / "data"
+DEFAULT_DATA_PATH = DATA_DIR / "gsm8k_train.jsonl"
+DEFAULT_OUTPUT_DIR = DATA_DIR
 OUTPUT_BASENAME = "gsm8k_train_teacher_annotated"
+SMOKE_TEST_NUM_ROWS = 4
 
 _MAX_TOKENS = 1024
-_TEACHER_TEMPERATURE = 0.7
 
 
-def annotate(prompts: list[str], batch_size: int) -> list[str]:
+def annotate(questions: list[str], batch_size: int) -> list[str]:
     teacher = TeacherClient()
     completions: list[str] = []
-    for start in range(0, len(prompts), batch_size):
-        batch = prompts[start : start + batch_size]
-        print(f"=== Annotating {start}-{start + len(batch)}/{len(prompts)} ===")
-        completions.extend(teacher.generate(batch, max_tokens=_MAX_TOKENS, temperature=_TEACHER_TEMPERATURE))
+    for start in range(0, len(questions), batch_size):
+        batch = questions[start : start + batch_size]
+        print(f"=== Annotating {start}-{start + len(batch)}/{len(questions)} ===")
+        completions.extend(teacher_solve(teacher, batch, max_tokens=_MAX_TOKENS))
     return completions
 
 
@@ -48,16 +50,10 @@ def main() -> None:
     parser.add_argument("--smoke-test", action="store_true", help="Annotate just a handful of rows.")
     args = parser.parse_args()
 
-    limit = args.limit
-    if args.smoke_test:
-        limit = min(4, limit) if limit is not None else 4
+    limit = cap_limit(args.limit, SMOKE_TEST_NUM_ROWS) if args.smoke_test else args.limit
 
-    df = pd.read_json(args.data, lines=True)
-    if limit is not None and limit < len(df):
-        df = df.sample(n=limit, random_state=args.seed).reset_index(drop=True)
-
-    prompts = [build_solve_prompt(q) for q in df["prompt"]]
-    completions = annotate(prompts, args.batch_size)
+    df = load_frame(args.data, n=limit, random_state=args.seed)
+    completions = annotate(df["prompt"].tolist(), args.batch_size)
 
     out = pd.DataFrame(
         {
@@ -67,11 +63,7 @@ def main() -> None:
         }
     )
 
-    args.output_dir.mkdir(parents=True, exist_ok=True)
-    jsonl_path = args.output_dir / f"{OUTPUT_BASENAME}.jsonl"
-    parquet_path = args.output_dir / f"{OUTPUT_BASENAME}.parquet"
-    out.to_json(jsonl_path, orient="records", lines=True)
-    out.to_parquet(parquet_path)
+    parquet_path, jsonl_path = write_frame(out, args.output_dir, OUTPUT_BASENAME)
 
     print(f"=== Done. Annotated {len(out)} rows. Wrote {jsonl_path} and {parquet_path} ===")
 
