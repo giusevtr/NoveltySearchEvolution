@@ -38,8 +38,7 @@ examples/kaggle_titanic/seed_solutions/output/
 examples/gms8k_benchmarking/data/
 examples/gsm8k_distillation/checkpoints/
 examples/gsm8k_distillation/data/
-examples/gsm8k_distillation/output/embedding_cache/
-examples/gsm8k_distillation/output/synthetic_distillation_old.parquet
+examples/gsm8k_distillation/output/
 results.csv
 logs/
 

@@ -31,7 +31,10 @@ To run the runnable demo, install its extra dependencies separately — see
 - **`EvoSample`** — one candidate: its `data`, lifecycle `status`
   (`STALE → ACTIVE ⇄ INACTIVE`, or terminal `REJECTED`), and genealogy (`parents`/`children`).
 - **`Population`** — owns every `EvoSample`, the novelty **archive** (the reference set novelty
-  is scored against), and batched embedding computation via a pluggable `embedding_fn`.
+  is scored against), and batched embedding computation via a pluggable `embedding_fn`. Status
+  accessors (`get_active`, `get_inactive`, `get_stale`, `get_rejected`) filter by lifecycle
+  status; `get_accepted()` returns everything except `REJECTED` — the set you typically want for
+  a final/checkpointed dataset.
 - **`EvolutionEngine`** — drives `step()`: select parents → generate candidates via your
   `mut_fn`/`crossover_fn` → run them through your `filter_fn`(s) → embed the survivors → select
   the most novel via `novelty_selection.score()` / `DefaultSelectionEngine` (k-NN novelty,
@@ -71,7 +74,56 @@ engine.set_selection_config({
 for _ in range(30):
     result = engine.step()         # or engine.run(30)
     print(result)                  # StepResult: counts + newly active/inactive/archived ids
+
+accepted = population.get_accepted()   # every sample that passed filter_fn: stale, active, or
+                                        # inactive — excludes only REJECTED samples
 ```
+
+## Logging: Weights & Biases
+
+`EvolutionEngine` can optionally log each `step()` to [Weights & Biases](https://wandb.ai)
+(`wandb`, a core dependency pulled in by `pip install -e .`).
+
+Setup: you need a W&B account. Either run `wandb login` once, or set the `WANDB_API_KEY`
+environment variable — `set_wandb_logging` just calls `wandb.init(...)` under the hood, so it
+picks up the standard `wandb` env/config resolution; the framework does not manage the key
+itself.
+
+```python
+engine.set_wandb_logging(project="novelty-search-demo", run_name="run-1")
+
+for _ in range(30):
+    result = engine.step()
+
+engine.finish_wandb()
+```
+
+Once enabled, every `step()` automatically logs, no extra calls needed:
+
+- population composition — `population/accepted`, `population/rejected`, `population/active`,
+  `population/inactive`, `population/stale`, `population/archive_size`
+- diversity metrics on the accepted population's embeddings (once it has 2+ members) —
+  `diversity/avg_pairwise_distance`, `diversity/vendi_score`
+
+### Diversity metrics
+
+`novelty_search_evolution/metrics.py` provides diversity metrics that operate on any `(N, D)`
+embedding array, independent of wandb:
+
+- **`vendi_score(embeddings)`** — the effective number of distinct samples: `exp(entropy)` of the
+  eigenvalues of the mean-normalized cosine-similarity kernel over the embeddings. It's a
+  redundancy-aware diversity measure — a population of near-duplicates scores low even if the
+  average pairwise distance looks fine, because near-duplicate embeddings contribute correlated
+  (not independent) mass to the kernel's spectrum. Higher means more effectively-distinct
+  samples.
+- **`average_pairwise_distance(embeddings)`** — mean cosine distance over all pairs; a simpler,
+  non-redundancy-aware diversity measure.
+- **`mean_min_distance_to_reference(embeddings, reference_embeddings)`** — for each reference
+  (e.g. ground-truth) embedding, the cosine distance to its nearest neighbor in `embeddings`,
+  averaged over all reference embeddings; lower means better coverage of the reference
+  distribution.
+
+All three are importable directly from `novelty_search_evolution`.
 
 ## Skills
 
@@ -113,6 +165,9 @@ time. The `output/` directory is gitignored and regenerated on every run.
   - `selection_engine.py` — `SelectionEngine` protocol, `DefaultSelectionEngine`
   - `novelty_selection.py` — k-NN novelty `score()`
   - `population_viewer.py` — renders the per-step population snapshot to HTML
+  - `metrics.py` — diversity metrics (Vendi score, average pairwise distance, mean min distance
+    to reference)
+  - `wandb_logging.py` — optional W&B logging for `EvolutionEngine.step()`
 
 - **`examples/2d_example/`** — runnable demo: 2D novelty search with obstacles, saves
   per-generation coverage plots
