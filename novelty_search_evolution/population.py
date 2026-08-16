@@ -74,8 +74,8 @@ class Population:
 
     def sample_random(self, k: int, status: Optional[Status] = None) -> List[EvoSample]:
         pool = self.get_by_status(status) if status is not None else self.get_all_samples()
-        # if k >= len(pool):
-        #     return list(pool)
+        if k >= len(pool):
+            return list(pool)
         return random.choices(pool, k=k)
 
     # --- embeddings ---
