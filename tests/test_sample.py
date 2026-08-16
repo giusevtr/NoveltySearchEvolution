@@ -149,3 +149,13 @@ class TestEquality:
         s1 = EvoSample(data="x", id="abc")
         s2 = EvoSample(data="y", id="abc")
         assert {s1, s2} == {s1}
+
+    def test_comparison_with_non_sample_is_not_equal(self):
+        s = EvoSample(data="x", id="abc")
+        assert s != "abc"
+        assert s.__eq__("abc") is NotImplemented
+
+    def test_repr_includes_id_status_and_generation(self):
+        s = EvoSample(data="x", id="abc", generation=3)
+        s.set_active()
+        assert repr(s) == "EvoSample(id='abc', status=active, generation=3)"

@@ -133,4 +133,15 @@ pytest tests/test_population.py -v             # Population tests
 pytest tests/test_sample.py -v                 # EvoSample tests
 pytest tests/test_novelty_selection.py -v      # Novelty scoring tests
 pytest tests/test_population_viewer.py -v      # Population viewer tests
+pytest tests/test_selection_engine.py -v       # DefaultSelectionEngine tests
+pytest tests/examples -v                       # Example (2D demo, GSM8K helpers) tests
+```
+
+`tests/examples/` covers the pure logic of the examples; tests needing an optional dependency
+(e.g. matplotlib for the 2D demo) are skipped when it isn't installed.
+
+Coverage report (`pytest-cov` comes with the `dev` extra):
+
+```bash
+pytest tests/ --cov=novelty_search_evolution --cov=examples --cov-report=term-missing
 ```
