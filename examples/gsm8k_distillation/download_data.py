@@ -2,7 +2,8 @@
 
 Downloads `openai/gsm8k` (`main` config) via Hugging Face `datasets`, maps each example to
 `{"prompt": question, "completion": answer}` (same transform used in `sft_training.ipynb`),
-and writes one JSON object per line to `../data/gsm8k_train.jsonl` and `gsm8k_val.jsonl`.
+and writes one JSON object per line to `data/gsm8k_train.jsonl` and `data/gsm8k_val.jsonl`,
+alongside this script — the directory every other script in this example reads from.
 
 Usage:
     ./run.sh download_data.py [--limit N]
@@ -23,7 +24,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 THIS_DIR = Path(__file__).parent
-DEFAULT_OUTPUT_DIR = THIS_DIR.parent / "data"
+DEFAULT_OUTPUT_DIR = THIS_DIR / "data"
 
 
 def to_prompt_completion(example: dict) -> dict:
