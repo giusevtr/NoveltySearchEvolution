@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 
 _ANSWER_RE = re.compile(r"####\s*(-?[\d,\.]+)")
@@ -86,15 +87,23 @@ def extract_question(raw_text: str) -> str:
 
 
 def extract_gsm8k_answer(completion: str) -> str | None:
-    """Parse the final numeric answer after the '#### ' terminator, or None if missing."""
-    match = _ANSWER_RE.search(completion)
-    return match.group(1) if match else None
+    """Parse the final numeric answer after the '#### ' terminator, or None if missing.
+
+    Uses the *last* '####' in the completion: reasoning text sometimes mentions the
+    terminator before the real final answer line.
+    """
+    matches = _ANSWER_RE.findall(completion)
+    return matches[-1] if matches else None
+
+
+def _to_float(value: str) -> float:
+    return float(value.replace(",", "").rstrip("."))
 
 
 def answers_match(predicted: str | None, true: str | None) -> bool:
     if predicted is None or true is None:
         return False
     try:
-        return float(predicted.replace(",", "")) == float(true.replace(",", ""))
+        return math.isclose(_to_float(predicted), _to_float(true), rel_tol=1e-9, abs_tol=1e-9)
     except ValueError:
         return False

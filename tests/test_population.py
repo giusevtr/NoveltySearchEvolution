@@ -160,3 +160,31 @@ class TestSampleRandom:
             s.set_active()
         result = pop.sample_random(10, status=Status.ACTIVE)
         assert len(result) == 2
+
+    def test_sample_random_returns_distinct_samples(self):
+        pop = Population()
+        samples = [EvoSample(data=i) for i in range(5)]
+        pop.bulk_add(samples)
+        for s in samples:
+            s.set_active()
+        result = pop.sample_random(4, status=Status.ACTIVE)
+        assert len({s.get_id() for s in result}) == 4
+
+    def test_sample_random_empty_pool_returns_empty(self):
+        pop = Population()
+        assert pop.sample_random(3, status=Status.ACTIVE) == []
+
+    def test_sample_random_non_positive_k_returns_empty(self):
+        pop = Population()
+        pop.bulk_add([EvoSample(data=1)])
+        assert pop.sample_random(0) == []
+
+
+class TestComputeEmbeddingsValidation:
+    def test_embedding_fn_returning_wrong_count_raises(self):
+        pop = Population()
+        pop.set_embedding_column(lambda data_list: [np.array([1.0])])
+        samples = [EvoSample(data=i) for i in range(3)]
+        pop.bulk_add(samples)
+        with pytest.raises(ValueError, match="one embedding per input"):
+            pop.compute_embeddings(samples)

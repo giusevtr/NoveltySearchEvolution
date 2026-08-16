@@ -201,8 +201,14 @@ def embedding_fn(data_list: list[dict]) -> list[np.ndarray]:
 # --- stopping condition ---
 
 
+def kept_samples(population: Population) -> list[EvoSample]:
+    """Archived ∪ active samples, de-duplicated: a sample can be both at once."""
+    by_id = {s.get_id(): s for s in population.get_archive() + population.get_active()}
+    return list(by_id.values())
+
+
 def bucket_counts(population: Population) -> np.ndarray:
-    samples = population.get_archive() + population.get_active()
+    samples = kept_samples(population)
     counts = np.zeros(K_STUDENT_SAMPLES + 1, dtype=int)
     for s in samples:
         counts[s.get_data()["difficulty"]] += 1
@@ -243,8 +249,7 @@ def checkpoint_synthetic_arm(population: Population, generation: int) -> None:
 
 
 def synthetic_arm_dataframe(population: Population) -> pd.DataFrame:
-    samples = population.get_archive() + population.get_active()
-    rows = [s.get_data() for s in samples]
+    rows = [s.get_data() for s in kept_samples(population)]
     return pd.DataFrame(rows)
 
 

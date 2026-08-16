@@ -226,11 +226,7 @@ def main(smoke_test: bool = False, num_records: int | None = None) -> None:
     jsonl_path = OUTPUT_DIR / "baseline_nemo_distillation.jsonl"
     frame.to_parquet(out_path)
     frame.to_json(jsonl_path, orient="records", lines=True)
-    logger.info("Wrote %d baseline samples to %s and %s", len(frame), out_path, jsonl_path)
-
-    frame.to_parquet(out_path)
-    frame.to_json(jsonl_path, orient="records", lines=True)
-    logger.info("Scored student difficulty and rewrote %s and %s", out_path, jsonl_path)
+    logger.info("Wrote %d difficulty-scored baseline samples to %s and %s", len(frame), out_path, jsonl_path)
 
     plot_nemo_difficulty_distribution(frame)
     logger.info("Wrote difficulty distribution plot to %s", OUTPUT_DIR / "nemo_difficulty_distribution.png")

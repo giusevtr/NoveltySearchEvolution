@@ -73,10 +73,17 @@ class Population:
         return self._by_id[id]
 
     def sample_random(self, k: int, status: Optional[Status] = None) -> List[EvoSample]:
+        """Return up to `k` distinct samples drawn without replacement.
+
+        Returns the whole pool when `k` exceeds its size, and an empty list when the pool is
+        empty, so callers never see duplicates or an IndexError.
+        """
+        if k <= 0:
+            return []
         pool = self.get_by_status(status) if status is not None else self.get_all_samples()
-        # if k >= len(pool):
-        #     return list(pool)
-        return random.choices(pool, k=k)
+        if k >= len(pool):
+            return list(pool)
+        return random.sample(pool, k)
 
     # --- embeddings ---
 
@@ -88,6 +95,11 @@ class Population:
         if self._embedding_fn is None:
             raise ValueError("No embedding_fn set — call set_embedding_column() first")
         embeddings = self._embedding_fn([s.get_data() for s in missing])
+        if len(embeddings) != len(missing):
+            raise ValueError(
+                f"embedding_fn returned {len(embeddings)} embeddings for {len(missing)} samples; "
+                "it must return one embedding per input, in the same order"
+            )
         for sample, embedding in zip(missing, embeddings):
             sample._set_embedding(np.asarray(embedding))
 
