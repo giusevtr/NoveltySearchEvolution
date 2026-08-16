@@ -104,13 +104,8 @@ class Population:
         if k < 0:
             raise ValueError(f"k must be non-negative, got {k}")
         pool = self.get_by_status(status) if status is not None else self.get_all_samples()
-        if k == 0:
-            return []
-        if not pool:
-            raise ValueError(
-                "Cannot sample from an empty population"
-                + (f" (no samples with status {status.value!r})" if status is not None else "")
-            )
+        if k >= len(pool):
+            return list(pool)
         return random.choices(pool, k=k)
 
     # --- embeddings ---
