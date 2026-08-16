@@ -97,12 +97,17 @@ def embed_components(df: pd.DataFrame, tag: str, cache_dir: Path, refresh: bool 
 
 
 def compute_tsne_2d(embeddings: np.ndarray) -> np.ndarray:
-    perplexity = min(30, max(5, (len(embeddings) - 1) // 3))
+    if len(embeddings) < 3:
+        raise ValueError(f"t-SNE needs at least 3 points, got {len(embeddings)}")
+    # sklearn requires perplexity < n_samples
+    perplexity = min(30, max(1, (len(embeddings) - 1) // 3), len(embeddings) - 1)
     return TSNE(n_components=2, random_state=0, perplexity=perplexity).fit_transform(embeddings)
 
 
 def average_pairwise_distance(embeddings: np.ndarray) -> float:
     """Mean cosine distance over all pairs — higher means more internally diverse."""
+    if len(embeddings) < 2:
+        raise ValueError(f"need at least 2 embeddings to average pairwise distance, got {len(embeddings)}")
     return float(np.mean(pdist(embeddings, metric="cosine")))
 
 
@@ -110,6 +115,8 @@ def mean_min_distance_to_reference(embeddings: np.ndarray, reference_embeddings:
     """For each reference (ground-truth) embedding, the cosine distance to its nearest neighbor
     in `embeddings`, averaged over all reference embeddings — lower means every ground-truth
     point has some synthetic point nearby, i.e. better coverage of the reference distribution."""
+    if len(embeddings) == 0 or len(reference_embeddings) == 0:
+        raise ValueError("both embeddings and reference_embeddings must be non-empty")
     dists = cdist(reference_embeddings, embeddings, metric="cosine")
     return float(dists.min(axis=1).mean())
 

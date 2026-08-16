@@ -1,0 +1,12 @@
+{
+  "run_name": "nemo_baseline",
+  "mode": "student",
+  "model": "Qwen/Qwen3-0.6B",
+  "lora_path": "/home/giuseppe/Code/NoveltySearchEvolution/examples/gsm8k_distillation/checkpoints/nemo_baseline",
+  "num_questions": 1319,
+  "k": 1,
+  "mean_correctness_rate": 0.5299469294920395,
+  "pass_at_k_rate": 0.5299469294920395,
+  "num_parsing_errors": 71,
+  "parsing_error_rate": 0.053828658074298714
+}

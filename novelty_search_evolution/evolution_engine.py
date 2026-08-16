@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import functools
+import inspect
 import json
 import random
 from dataclasses import dataclass, field
@@ -16,6 +18,15 @@ from .selection_engine import DefaultSelectionEngine, SelectionEngine
 MutFn = Callable[[EvoSample], List[Any]]
 CrossoverFn = Callable[[EvoSample, EvoSample], List[Any]]
 FilterFn = Callable[[List[EvoSample]], List[Dict[str, Any]]]
+
+
+def _fn_name(fn: Callable[..., Any]) -> str:
+    """Name for any callable: plain function/method, functools.partial, or callable object."""
+    if isinstance(fn, functools.partial):
+        return _fn_name(fn.func)
+    if inspect.isfunction(fn) or inspect.ismethod(fn) or isinstance(fn, type):
+        return fn.__name__
+    return type(fn).__name__
 
 
 def _default_log_dir() -> Path:
@@ -58,6 +69,7 @@ class EvolutionEngine:
         self._filter_fns: List[FilterFn] = []
         self._selection_config: Dict[str, Any] = {}
         self._selection_engine: Optional[SelectionEngine] = None
+        self._selection_engine_is_default = False
 
     # --- setup ---
 
@@ -74,15 +86,21 @@ class EvolutionEngine:
 
     def set_selection_config(self, config: Dict[str, Any]) -> None:
         self._selection_config = config
+        # drop the memoized default engine so nn-k / distance changes take effect mid-run
+        if self._selection_engine_is_default:
+            self._selection_engine = None
+            self._selection_engine_is_default = False
 
     def set_selection_engine(self, engine: SelectionEngine) -> None:
         self._selection_engine = engine
+        self._selection_engine_is_default = False
 
     def _get_selection_engine(self) -> SelectionEngine:
         if self._selection_engine is None:
+            self._selection_engine_is_default = True
             self._selection_engine = DefaultSelectionEngine(
                 self.population,
-                nn_k=self._selection_config["nn-k"],
+                nn_k=self._selection_config.get("nn-k", 1),
                 distance=self._selection_config.get("distance", "cosine"),
             )
         return self._selection_engine
@@ -151,9 +169,15 @@ class EvolutionEngine:
         for filter_fn in self._filter_fns:
             unrejected = [c for c in candidates if c.get_status() != Status.REJECTED]
             if not unrejected:
-                trace.append(f"filter {filter_fn.__name__}: skipped (no unrejected candidates)")
+                trace.append(f"filter {_fn_name(filter_fn)}: skipped (no unrejected candidates)")
                 break
             judgements = filter_fn(unrejected)
+            if len(judgements) != len(unrejected):
+                raise ValueError(
+                    f"filter {_fn_name(filter_fn)} returned {len(judgements)} judgements for "
+                    f"{len(unrejected)} candidates; it must return one judgement per candidate, "
+                    "in the same order"
+                )
             num_rejected_by_filter = 0
             for candidate, judgement in zip(unrejected, judgements):
                 if not judgement.get("accepted", False):
@@ -165,7 +189,7 @@ class EvolutionEngine:
                 elif judgement.get("feedback"):
                     candidate._add_feedback(judgement["feedback"])
             trace.append(
-                f"filter {filter_fn.__name__}: evaluated {len(unrejected)}, "
+                f"filter {_fn_name(filter_fn)}: evaluated {len(unrejected)}, "
                 f"rejected {num_rejected_by_filter}"
             )
 

@@ -1,0 +1,11 @@
+{
+  "metric": "mean_correctness_rate",
+  "base_accuracy": 0.4094010614101592,
+  "teacher_accuracy": 0.9522365428354814,
+  "synthetic_accuracy": 0.5534495830174374,
+  "groundtruth_accuracy": 0.5564821834723275,
+  "nemo_accuracy": 0.5299469294920395,
+  "synthetic_gap_closure": 0.26536312849162,
+  "groundtruth_gap_closure": 0.27094972067039097,
+  "nemo_gap_closure": 0.22206703910614536
+}

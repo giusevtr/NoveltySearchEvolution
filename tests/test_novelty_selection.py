@@ -50,3 +50,28 @@ class TestInvalidDistance:
         X = np.array([[0.0, 0.0]])
         with pytest.raises(ValueError):
             novelty_selection.score(X, k=1, distance="manhattan", reference=None)
+
+
+class TestDegenerateInputs:
+    def test_single_row_without_reference_scores_zero(self):
+        X = np.array([[1.0, 0.0]])
+        scores = novelty_selection.score(X, k=1, distance="euclidean", reference=None)
+        assert scores.tolist() == [0.0]
+
+    def test_empty_reference_scores_zero(self):
+        X = np.array([[1.0, 0.0], [0.0, 1.0]])
+        scores = novelty_selection.score(X, k=1, distance="euclidean", reference=np.empty((0, 2)))
+        assert scores.tolist() == [0.0, 0.0]
+
+    def test_empty_X_returns_empty(self):
+        scores = novelty_selection.score(np.empty((0, 2)), k=1, distance="euclidean")
+        assert scores.shape == (0,)
+
+    def test_non_positive_k_raises(self):
+        with pytest.raises(ValueError):
+            novelty_selection.score(np.array([[1.0, 0.0]]), k=0, distance="euclidean")
+
+    def test_zero_row_with_cosine_raises(self):
+        X = np.array([[0.0, 0.0], [1.0, 0.0]])
+        with pytest.raises(ValueError, match="zero-norm"):
+            novelty_selection.score(X, k=1, distance="cosine")
