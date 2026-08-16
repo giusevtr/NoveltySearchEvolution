@@ -6,13 +6,17 @@ Bedrock-hosted Qwen3-32B teacher used by run.py, instead of a separate NVIDIA-ho
 
 from __future__ import annotations
 
-from fastapi import FastAPI
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, Field
 
 from examples.gsm8k_distillation.clients.teacher_client import TeacherClient
 
 app = FastAPI()
 _teacher = TeacherClient()
+
+# Caps what a single request can spend on the Bedrock teacher; well above the example's own
+# _SOLVE_MAX_TOKENS.
+_MAX_TOKENS_LIMIT = 4096
 
 
 class ChatMessage(BaseModel):
@@ -27,14 +31,16 @@ class ChatMessage(BaseModel):
 
 class ChatCompletionRequest(BaseModel):
     model: str
-    messages: list[ChatMessage]
-    temperature: float = 0.9
-    max_tokens: int = 256
+    messages: list[ChatMessage] = Field(min_length=1)
+    temperature: float = Field(default=0.9, ge=0.0, le=2.0)
+    max_tokens: int = Field(default=256, ge=1, le=_MAX_TOKENS_LIMIT)
 
 
 @app.post("/v1/chat/completions")
 def chat_completions(req: ChatCompletionRequest) -> dict:
-    prompt = next(m.text() for m in reversed(req.messages) if m.role == "user")
+    prompt = next((m.text() for m in reversed(req.messages) if m.role == "user"), None)
+    if not prompt:
+        raise HTTPException(status_code=400, detail="No non-empty user message in request")
     [completion] = _teacher.generate([prompt], max_tokens=req.max_tokens, temperature=req.temperature)
     return {
         "id": "chatcmpl-teacher-proxy",

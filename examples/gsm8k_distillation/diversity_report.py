@@ -87,13 +87,21 @@ def embed_cached(questions: list[str], tag: str, cache_dir: Path, refresh: bool 
     cache_dir.mkdir(parents=True, exist_ok=True)
     cache_path = cache_dir / f"{tag}_{_cache_key(questions)}.npz"
     if not refresh and cache_path.exists():
-        cached = np.load(cache_path, allow_pickle=True)
-        if cached["questions"].tolist() == questions:
-            logger.info("Loaded cached %s embeddings (%d questions) from %s", tag, len(questions), cache_path)
-            return cached["embeddings"]
+        # allow_pickle stays off: a cache file is just arrays, and unpickling one would execute
+        # whatever code it carries.
+        try:
+            with np.load(cache_path) as cached:
+                cached_questions = cached["questions"].tolist()
+                cached_embeddings = cached["embeddings"]
+        except ValueError:
+            logger.warning("Ignoring unreadable %s embedding cache at %s; regenerating", tag, cache_path)
+        else:
+            if cached_questions == questions:
+                logger.info("Loaded cached %s embeddings (%d questions) from %s", tag, len(questions), cache_path)
+                return cached_embeddings
 
     embeddings = embed(questions)
-    np.savez(cache_path, questions=np.array(questions, dtype=object), embeddings=embeddings)
+    np.savez(cache_path, questions=np.array(questions, dtype=np.str_), embeddings=embeddings)
     logger.info("Cached %s embeddings to %s", tag, cache_path)
     return embeddings
 
