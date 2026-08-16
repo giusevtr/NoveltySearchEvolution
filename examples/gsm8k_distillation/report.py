@@ -19,22 +19,18 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import json
-import logging
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
+from examples.gsm8k_distillation.common.files import read_json, write_json
+from examples.gsm8k_distillation.common.logging_utils import get_logger
+from examples.gsm8k_distillation.common.paths import OUTPUT_DIR
+from examples.gsm8k_distillation.common.plots import save_figure
 
-THIS_DIR = Path(__file__).parent
-OUTPUT_DIR = THIS_DIR / "output"
+logger = get_logger(__name__)
+
 METRIC = "mean_correctness_rate"
-
-
-def load_report(path: Path) -> dict:
-    return json.loads(path.read_text())
 
 
 def gap_closure(distilled_acc: float, base_acc: float, teacher_acc: float) -> float:
@@ -103,9 +99,7 @@ def plot_gap_closure(report: dict, output_path: Path) -> None:
     ax.set_ylabel(METRIC)
     ax.set_title("GSM8K val accuracy: base vs distilled arms vs teacher")
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(output_path, dpi=120)
-    plt.close(fig)
+    save_figure(fig, output_path)
 
 
 def main() -> None:
@@ -118,16 +112,15 @@ def main() -> None:
     parser.add_argument("--output", type=Path, default=OUTPUT_DIR / "gap_closure_report.json")
     args = parser.parse_args()
 
-    base = load_report(args.base_report)
-    teacher = load_report(args.teacher_report)
-    synthetic = load_report(args.synthetic_report)
-    groundtruth = load_report(args.groundtruth_report)
-    nemo = load_report(args.nemo_report)
+    base = read_json(args.base_report)
+    teacher = read_json(args.teacher_report)
+    synthetic = read_json(args.synthetic_report)
+    groundtruth = read_json(args.groundtruth_report)
+    nemo = read_json(args.nemo_report)
 
     report = build_gap_closure_report(base, teacher, synthetic, groundtruth, nemo)
 
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(report, indent=2))
+    write_json(report, args.output)
     logger.info("Wrote gap-closure report to %s", args.output)
 
     plot_gap_closure(report, args.output.parent / "gap_closure_report.png")

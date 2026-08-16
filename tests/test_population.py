@@ -141,6 +141,71 @@ class TestEmbeddings:
         embeddings = pop.get_archive_embeddings()
         assert embeddings.shape == (2, 1)
 
+    def test_compute_embeddings_without_embedding_fn_raises(self):
+        pop = Population()
+        s = EvoSample(data=1)
+        pop.add(s)
+        with pytest.raises(ValueError, match="No embedding_fn set"):
+            pop.compute_embeddings([s])
+
+    def test_compute_embeddings_without_embedding_fn_is_noop_when_nothing_missing(self):
+        pop = Population()
+        s = EvoSample(data=1)
+        s._set_embedding(np.array([1.0]))
+        pop.add(s)
+        pop.compute_embeddings([s])  # no embedding_fn needed — nothing to compute
+
+    def test_compute_embeddings_defaults_to_whole_population(self):
+        pop = Population()
+        calls = []
+        pop.set_embedding_column(make_embedding_fn(calls))
+        pop.bulk_add([EvoSample(data=i) for i in range(4)])
+        pop.compute_embeddings()
+        assert calls == [4]
+
+    def test_get_embeddings_of_empty_list_returns_empty_matrix(self):
+        pop = Population()
+        assert pop.get_embeddings([]).shape == (0, 0)
+
+    def test_get_archive_embeddings_empty_archive(self):
+        pop = Population()
+        assert pop.get_archive_embeddings().size == 0
+
+
+class TestEmbeddingMatrix:
+    def test_matrix_defaults_to_all_samples(self):
+        pop = Population()
+        calls = []
+        pop.set_embedding_column(make_embedding_fn(calls))
+        samples = [EvoSample(data=i) for i in [4, 5]]
+        pop.bulk_add(samples)
+
+        matrix, returned = pop.get_embedding_matrix()
+        assert matrix.tolist() == [[4.0], [5.0]]
+        assert returned == samples
+
+    def test_matrix_filtered_by_status(self):
+        pop = Population()
+        calls = []
+        pop.set_embedding_column(make_embedding_fn(calls))
+        active, stale = EvoSample(data=7), EvoSample(data=8)
+        pop.bulk_add([active, stale])
+        active.set_active()
+
+        matrix, returned = pop.get_embedding_matrix(status=Status.ACTIVE)
+        assert matrix.tolist() == [[7.0]]
+        assert returned == [active]
+
+    def test_matrix_rows_align_with_returned_samples(self):
+        pop = Population()
+        calls = []
+        pop.set_embedding_column(make_embedding_fn(calls))
+        pop.bulk_add([EvoSample(data=i) for i in [3, 1, 2]])
+
+        matrix, returned = pop.get_embedding_matrix()
+        for row, sample in zip(matrix, returned):
+            assert row.tolist() == [float(sample.get_data())]
+
 
 class TestSampleRandom:
     def test_sample_random_with_status(self):
@@ -160,6 +225,15 @@ class TestSampleRandom:
             s.set_active()
         result = pop.sample_random(10, status=Status.ACTIVE)
         assert len(result) == 2
+    def test_sample_random_without_status_uses_whole_population(self):
+        pop = Population()
+        samples = [EvoSample(data=i) for i in range(4)]
+        pop.bulk_add(samples)
+        samples[0].set_reject()
+
+        result = pop.sample_random(3)
+        assert len(result) == 3
+        assert all(s in samples for s in result)
 
     def test_sample_random_returns_distinct_samples(self):
         pop = Population()
@@ -172,12 +246,13 @@ class TestSampleRandom:
 
     def test_sample_random_empty_pool_returns_empty(self):
         pop = Population()
+        pop.add(EvoSample(data=1))  # stale, so no active samples to draw from
         assert pop.sample_random(3, status=Status.ACTIVE) == []
 
-    def test_sample_random_non_positive_k_returns_empty(self):
+    def test_sample_random_zero_returns_empty(self):
         pop = Population()
-        pop.bulk_add([EvoSample(data=1)])
-        assert pop.sample_random(0) == []
+        pop.set_seeds([1, 2])
+        assert pop.sample_random(0, status=Status.ACTIVE) == []
 
 
 class TestComputeEmbeddingsValidation:
