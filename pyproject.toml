@@ -5,6 +5,7 @@ requires-python = "==3.12.*"
 dependencies = [
     "numpy",
     "scipy",
+    "wandb",
 ]
 
 [project.optional-dependencies]

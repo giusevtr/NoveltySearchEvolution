@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import importlib
 import sys
+import threading
 import types
 
 import numpy as np
@@ -35,13 +36,21 @@ embedding = _import_embedding_module()
 
 
 class FakeClient:
+    """question_embedding_fn() calls embed_query() concurrently from a thread pool, so the
+    counter that hands out `vectors` in call order must be synchronized."""
+
     def __init__(self, vectors):
         self.vectors = vectors
         self.calls = []
+        self._index = 0
+        self._lock = threading.Lock()
 
-    def embed_documents(self, texts):
-        self.calls.append(list(texts))
-        return self.vectors
+    def embed_query(self, text):
+        with self._lock:
+            self.calls.append(text)
+            vector = self.vectors[self._index]
+            self._index += 1
+        return vector
 
 
 @pytest.fixture
@@ -76,12 +85,22 @@ class TestQuestionEmbeddingFn:
         vectors = embedding.question_embedding_fn(["a"])
         np.testing.assert_allclose(vectors[0], [0.0, 0.0])
 
-    def test_questions_are_forwarded_as_one_batch(self, reset_client_cache, monkeypatch):
+    def test_each_question_is_forwarded_once(self, reset_client_cache, monkeypatch):
         client = FakeClient([[1.0], [1.0], [1.0]])
         monkeypatch.setattr(embedding, "_get_embeddings_client", lambda model_id: client)
 
         embedding.question_embedding_fn(["a", "b", "c"])
-        assert client.calls == [["a", "b", "c"]]
+        # Dispatched concurrently over a thread pool, so only membership/count is guaranteed —
+        # not call order.
+        assert sorted(client.calls) == ["a", "b", "c"]
+
+    def test_empty_input_returns_empty_without_calling_client(self, reset_client_cache, monkeypatch):
+        client = FakeClient([])
+        monkeypatch.setattr(embedding, "_get_embeddings_client", lambda model_id: client)
+
+        vectors = embedding.question_embedding_fn([])
+        assert vectors.shape == (0, 0)
+        assert client.calls == []
 
 
 class TestDifficultyOneHot:

@@ -15,6 +15,7 @@ from .population import Population
 from .population_viewer import render_population_html
 from .sample import EvoSample, Status
 from .selection_engine import DefaultSelectionEngine, SelectionEngine
+from .wandb_logging import init_wandb_run, log_step_metrics
 
 MutFn = Callable[[EvoSample], List[Any]]
 CrossoverFn = Callable[[EvoSample, EvoSample], List[Any]]
@@ -113,6 +114,7 @@ class EvolutionEngine:
         self._selection_config: Dict[str, Any] = {}
         self._selection_engine: Optional[SelectionEngine] = None
         self._selection_engine_is_default = False
+        self._wandb_run = None
 
     # --- setup ---
 
@@ -137,6 +139,15 @@ class EvolutionEngine:
     def set_selection_engine(self, engine: SelectionEngine) -> None:
         self._selection_engine = engine
         self._selection_engine_is_default = False
+
+    def set_wandb_logging(
+        self, project: str, run_name: Optional[str] = None, config: Optional[Dict[str, Any]] = None
+    ) -> None:
+        self._wandb_run = init_wandb_run(project=project, run_name=run_name, config=config)
+
+    def finish_wandb(self) -> None:
+        if self._wandb_run is not None:
+            self._wandb_run.finish()
 
     def _get_selection_engine(self) -> SelectionEngine:
         if self._selection_engine is None:
@@ -304,7 +315,7 @@ class EvolutionEngine:
         log_file.write_text("\n".join(trace) + "\n")
         self._snapshot_population(generation)
 
-        return StepResult(
+        result = StepResult(
             generation=generation,
             num_candidates=len(candidates),
             num_accepted=len(accepted_candidates),
@@ -314,6 +325,11 @@ class EvolutionEngine:
             newly_inactive_ids=newly_inactive_ids,
             newly_archived_ids=newly_archived_ids,
         )
+
+        if self._wandb_run is not None:
+            log_step_metrics(self._wandb_run, self.population, result)
+
+        return result
 
     def _snapshot_population(self, generation: int) -> None:
         snapshot = [

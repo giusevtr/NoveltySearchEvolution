@@ -69,6 +69,8 @@ class TestStatusGetters:
         assert pop.get_rejected() == [c]
         assert pop.get_stale() == [d]
         assert pop.get_by_status(Status.ACTIVE) == [a]
+        assert pop.get_accepted() == [a, b, d]
+        assert pop.get_selected() == [a, b]
 
     def test_get_by_id(self):
         pop = Population()

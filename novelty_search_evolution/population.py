@@ -92,6 +92,17 @@ class Population:
     def get_rejected(self) -> List[EvoSample]:
         return self.get_by_status(Status.REJECTED)
 
+    def get_accepted(self) -> List[EvoSample]:
+        """All samples that have not been rejected by a filter — stale, active, or inactive."""
+        return [s for s in self._by_id.values() if s.get_status() != Status.REJECTED]
+
+    def get_selected(self) -> List[EvoSample]:
+        """All samples that were novelty-selected into the active pool at some point — currently
+        active, or active previously and since displaced (INACTIVE). Excludes samples that
+        passed every filter but were never selected (STALE), and samples a filter rejected
+        (REJECTED)."""
+        return [s for s in self._by_id.values() if s.get_status() in (Status.ACTIVE, Status.INACTIVE)]
+
     def get_by_status(self, status: Status) -> List[EvoSample]:
         return [s for s in self._by_id.values() if s.get_status() == status]
 
