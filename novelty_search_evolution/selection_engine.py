@@ -45,10 +45,14 @@ class DefaultSelectionEngine:
         for _ in range(min(top_k, len(remaining))):
             X = self.population.get_embeddings(remaining)
             reference = archive_X if archive_X.size else None
-            scores = novelty_selection.score(
-                X, k=self.nn_k, distance=self.distance, reference=reference
-            )
-            best_idx = int(scores.argmax())
+            if reference is None and len(remaining) == 1:
+                # Novelty is undefined with nothing to compare against: take the last candidate.
+                best_idx = 0
+            else:
+                scores = novelty_selection.score(
+                    X, k=self.nn_k, distance=self.distance, reference=reference
+                )
+                best_idx = int(scores.argmax())
             best = remaining.pop(best_idx)
             selected.append(best)
             embedding = best.get_embedding().reshape(1, -1)

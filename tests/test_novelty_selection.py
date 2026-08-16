@@ -50,3 +50,41 @@ class TestInvalidDistance:
         X = np.array([[0.0, 0.0]])
         with pytest.raises(ValueError):
             novelty_selection.score(X, k=1, distance="manhattan", reference=None)
+
+
+class TestInvalidInputs:
+    def test_k_below_one_raises(self):
+        X = np.array([[0.0, 0.0], [1.0, 1.0]])
+        with pytest.raises(ValueError, match="k must be at least 1"):
+            novelty_selection.score(X, k=0, distance="euclidean", reference=None)
+
+    def test_empty_reference_raises(self):
+        X = np.array([[0.0, 0.0]])
+        with pytest.raises(ValueError, match="reference is empty"):
+            novelty_selection.score(X, k=1, distance="euclidean", reference=np.empty((0, 2)))
+
+    def test_mismatched_reference_dimension_raises(self):
+        X = np.array([[0.0, 0.0]])
+        with pytest.raises(ValueError, match="features"):
+            novelty_selection.score(X, k=1, distance="euclidean", reference=np.zeros((2, 3)))
+
+    def test_single_row_self_reference_raises(self):
+        X = np.array([[0.0, 0.0]])
+        with pytest.raises(ValueError, match="single row"):
+            novelty_selection.score(X, k=1, distance="euclidean", reference=None)
+
+    def test_nan_distances_raise(self):
+        X = np.array([[0.0, 0.0]])
+        reference = np.array([[1.0, 1.0]])
+        with pytest.raises(ValueError, match="NaN"):
+            novelty_selection.score(X, k=1, distance="cosine", reference=reference)
+
+    def test_empty_X_returns_empty_scores(self):
+        scores = novelty_selection.score(
+            np.empty((0, 2)), k=1, distance="euclidean", reference=np.zeros((1, 2))
+        )
+        assert scores.shape == (0,)
+
+    def test_non_2d_X_raises(self):
+        with pytest.raises(ValueError, match="2-D"):
+            novelty_selection.score(np.array([1.0, 2.0]), k=1, distance="euclidean")

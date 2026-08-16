@@ -6,7 +6,7 @@ Bedrock-hosted Qwen3-32B teacher used by run.py, instead of a separate NVIDIA-ho
 
 from __future__ import annotations
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 from examples.gsm8k_distillation.clients.teacher_client import TeacherClient
@@ -34,7 +34,9 @@ class ChatCompletionRequest(BaseModel):
 
 @app.post("/v1/chat/completions")
 def chat_completions(req: ChatCompletionRequest) -> dict:
-    prompt = next(m.text() for m in reversed(req.messages) if m.role == "user")
+    prompt = next((m.text() for m in reversed(req.messages) if m.role == "user"), None)
+    if prompt is None:
+        raise HTTPException(status_code=400, detail="No message with role 'user' in request")
     [completion] = _teacher.generate([prompt], max_tokens=req.max_tokens, temperature=req.temperature)
     return {
         "id": "chatcmpl-teacher-proxy",
