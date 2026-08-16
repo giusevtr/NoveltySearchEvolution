@@ -101,9 +101,10 @@ class TestDifficultyOneHot:
     def test_empty_input(self):
         assert embedding.difficulty_one_hot([], k=3).shape == (0, 4)
 
-    def test_out_of_range_label_raises(self):
-        with pytest.raises(IndexError):
-            embedding.difficulty_one_hot([5], k=2)
+    @pytest.mark.parametrize("difficulty", [5, -1])
+    def test_out_of_range_label_raises(self, difficulty):
+        with pytest.raises(ValueError, match="outside the valid range"):
+            embedding.difficulty_one_hot([difficulty], k=2)
 
 
 class TestCombineEmbeddings:

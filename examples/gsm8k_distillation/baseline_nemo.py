@@ -213,7 +213,7 @@ def main(smoke_test: bool = False, num_records: int | None = None) -> None:
     logger.info("Kept %d of %d generated questions after filtering malformed completions", len(frame), num_records)
 
     parquet_path, jsonl_path = write_frame(frame, OUTPUT_DIR, OUTPUT_BASENAME)
-    logger.info("Wrote %d baseline samples to %s and %s", len(frame), parquet_path, jsonl_path)
+    logger.info("Wrote %d difficulty-scored baseline samples to %s and %s", len(frame), parquet_path, jsonl_path)
 
     plot_nemo_difficulty_distribution(frame)
     logger.info("Wrote difficulty distribution plot to %s", DIFFICULTY_PLOT_PATH)

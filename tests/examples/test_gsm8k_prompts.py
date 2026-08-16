@@ -124,8 +124,9 @@ class TestExtractGsm8kAnswer:
     def test_returns_none_without_a_numeric_answer(self, completion):
         assert prompts.extract_gsm8k_answer(completion) is None
 
-    def test_returns_first_match_when_multiple(self):
-        assert prompts.extract_gsm8k_answer("#### 1\nmore\n#### 2") == "1"
+    def test_returns_last_match_when_multiple(self):
+        # the model's own final answer, not a marker quoted from the prompt's few-shot examples
+        assert prompts.extract_gsm8k_answer("#### 1\nmore\n#### 2") == "2"
 
 
 class TestAnswersMatch:
