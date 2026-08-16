@@ -27,43 +27,44 @@ uvicorn`.
 from __future__ import annotations
 
 import argparse
-import logging
 import os
 import socket
 import threading
 import time
 
 import data_designer.config as dd
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from data_designer.interface import DataDesigner
 
 from examples.gsm8k_distillation.clients.student_client import StudentClient, StudentConfig
 from examples.gsm8k_distillation.clients.teacher_openai_proxy import serve as serve_proxy
+from examples.gsm8k_distillation.common.files import load_seed_questions, write_frame
+from examples.gsm8k_distillation.common.inference import (
+    K_STUDENT_SAMPLES,
+    MUTATION_MAX_TOKENS,
+    MUTATION_TEMPERATURE,
+    SOLVE_MAX_TOKENS,
+    TEACHER_SOLVE_TEMPERATURE,
+    score_difficulty,
+)
+from examples.gsm8k_distillation.common.logging_utils import get_logger
+from examples.gsm8k_distillation.common.paths import GSM8K_TRAIN_PARQUET, OUTPUT_DIR
+from examples.gsm8k_distillation.common.plots import plot_difficulty_histogram
 from examples.gsm8k_distillation.novelty_search.prompts import (
     TOPICS,
     build_baseline_generation_prompt,
     build_solve_prompt,
     extract_gsm8k_answer,
 )
-from examples.gsm8k_distillation.run import (
-    DATA_DIR,
-    K_STUDENT_SAMPLES,
-    NUM_SEEDS,
-    OUTPUT_DIR,
-    _MUTATION_MAX_TOKENS,
-    _MUTATION_TEMPERATURE,
-    _SOLVE_MAX_TOKENS,
-    _TEACHER_SOLVE_TEMPERATURE,
-)
-from examples.gsm8k_distillation.run import score_difficulty as run_score_difficulty
+from examples.gsm8k_distillation.run import NUM_SEEDS
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 DEFAULT_NUM_RECORDS = 1200
 SMOKE_TEST_NUM_RECORDS = 4
+OUTPUT_BASENAME = "baseline_nemo_distillation"
+DIFFICULTY_PLOT_PATH = OUTPUT_DIR / "nemo_difficulty_distribution.png"
 
 _PROXY_API_KEY_ENV = "TEACHER_PROXY_DUMMY_KEY"
 
@@ -103,11 +104,6 @@ def _start_proxy() -> int:
     raise RuntimeError("Teacher proxy did not come up in time")
 
 
-def load_seed_questions(n: int, random_state: int = 0) -> list[str]:
-    df = pd.read_parquet(DATA_DIR / "gsm8k_train.parquet")
-    return df["prompt"].sample(n=n, random_state=random_state).tolist()
-
-
 def generate_dataset(seed_questions: list[str], num_records: int, proxy_port: int) -> pd.DataFrame:
     os.environ[_PROXY_API_KEY_ENV] = "unused"
     provider = dd.ModelProvider(
@@ -121,7 +117,7 @@ def generate_dataset(seed_questions: list[str], num_records: int, proxy_port: in
         model="qwen.qwen3-32b-v1:0",
         provider="teacher-proxy",
         inference_parameters=dd.ChatCompletionInferenceParams(
-            temperature=_MUTATION_TEMPERATURE, max_tokens=_MUTATION_MAX_TOKENS
+            temperature=MUTATION_TEMPERATURE, max_tokens=MUTATION_MAX_TOKENS
         ),
     )
     solve_cfg = dd.ModelConfig(
@@ -129,7 +125,7 @@ def generate_dataset(seed_questions: list[str], num_records: int, proxy_port: in
         model="qwen.qwen3-32b-v1:0",
         provider="teacher-proxy",
         inference_parameters=dd.ChatCompletionInferenceParams(
-            temperature=_TEACHER_SOLVE_TEMPERATURE, max_tokens=_SOLVE_MAX_TOKENS
+            temperature=TEACHER_SOLVE_TEMPERATURE, max_tokens=SOLVE_MAX_TOKENS
         ),
     )
 
@@ -182,23 +178,18 @@ def score_student_difficulty(frame: pd.DataFrame) -> pd.DataFrame:
     """Score each question's difficulty by sampling the student K times, matching run.py exactly."""
     student = StudentClient(StudentConfig())
     student.load()
-    difficulties = run_score_difficulty(student, frame["question"].tolist(), frame["final_answer"].tolist())
+    difficulties = score_difficulty(student, frame["question"].tolist(), frame["final_answer"].tolist())
     frame = frame.copy()
     frame["student_difficulty"] = difficulties
     return frame
 
 
 def plot_nemo_difficulty_distribution(frame: pd.DataFrame) -> None:
-    counts = np.bincount(frame["student_difficulty"], minlength=K_STUDENT_SAMPLES + 1)
-    fig, ax = plt.subplots(figsize=(7, 4))
-    ax.bar(range(K_STUDENT_SAMPLES + 1), counts)
-    ax.set_xlabel("difficulty (# of K student successes)")
-    ax.set_ylabel("sample count")
-    ax.set_title("NeMo baseline dataset difficulty distribution")
-
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    fig.savefig(OUTPUT_DIR / "nemo_difficulty_distribution.png", dpi=120)
-    plt.close(fig)
+    plot_difficulty_histogram(
+        np.bincount(frame["student_difficulty"], minlength=K_STUDENT_SAMPLES + 1),
+        title="NeMo baseline dataset difficulty distribution",
+        output_path=DIFFICULTY_PLOT_PATH,
+    )
 
 
 def main(smoke_test: bool = False, num_records: int | None = None) -> None:
@@ -206,7 +197,7 @@ def main(smoke_test: bool = False, num_records: int | None = None) -> None:
     if num_records is None:
         num_records = SMOKE_TEST_NUM_RECORDS if smoke_test else DEFAULT_NUM_RECORDS
 
-    seed_questions = load_seed_questions(n=num_seeds)
+    seed_questions = load_seed_questions(GSM8K_TRAIN_PARQUET, n=num_seeds)
     logger.info("Loaded %d seed questions", len(seed_questions))
 
     proxy_port = _start_proxy()
@@ -221,19 +212,11 @@ def main(smoke_test: bool = False, num_records: int | None = None) -> None:
     frame = score_student_difficulty(frame)
     logger.info("Kept %d of %d generated questions after filtering malformed completions", len(frame), num_records)
 
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = OUTPUT_DIR / "baseline_nemo_distillation.parquet"
-    jsonl_path = OUTPUT_DIR / "baseline_nemo_distillation.jsonl"
-    frame.to_parquet(out_path)
-    frame.to_json(jsonl_path, orient="records", lines=True)
-    logger.info("Wrote %d baseline samples to %s and %s", len(frame), out_path, jsonl_path)
-
-    frame.to_parquet(out_path)
-    frame.to_json(jsonl_path, orient="records", lines=True)
-    logger.info("Scored student difficulty and rewrote %s and %s", out_path, jsonl_path)
+    parquet_path, jsonl_path = write_frame(frame, OUTPUT_DIR, OUTPUT_BASENAME)
+    logger.info("Wrote %d baseline samples to %s and %s", len(frame), parquet_path, jsonl_path)
 
     plot_nemo_difficulty_distribution(frame)
-    logger.info("Wrote difficulty distribution plot to %s", OUTPUT_DIR / "nemo_difficulty_distribution.png")
+    logger.info("Wrote difficulty distribution plot to %s", DIFFICULTY_PLOT_PATH)
 
 
 if __name__ == "__main__":
