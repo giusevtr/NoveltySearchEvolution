@@ -104,7 +104,7 @@ gap_closure = (distilled_accuracy − base_accuracy) / (teacher_accuracy − bas
 
 ### 3.1 Distillation accuracy and gap closure
 
-![Gap closure report](output/gap_closure/Qwen_Qwen3-1.7B/gap_closure_report.png)
+![Gap closure report](plots/gap_closure_report.png)
 
 | arm | accuracy | gap closure |
 |---|---:|---:|
@@ -124,8 +124,8 @@ metrics are the more decisive comparison between them.
 ### 3.2 Difficulty coverage
 
 <p float="left">
-  <img src="output/difficulty_distribution.png" width="48%" />
-  <img src="output/nemo_difficulty_distribution.png" width="48%" />
+  <img src="plots/difficulty_distribution.png" width="48%" />
+  <img src="plots/nemo_difficulty_distribution.png" width="48%" />
 </p>
 
 *(left: novelty search — difficulty is one axis of the novelty embedding; right: NeMo
@@ -140,7 +140,7 @@ onto easy questions, even without a hard per-bucket minimum.
 
 ### 3.3 Diversity: prompt vs. teacher annotation
 
-![Diversity t-SNE](output/diversity_tsne.png)
+![Diversity t-SNE](plots/diversity_tsne.png)
 
 Each dataset is embedded twice — once on question text ("prompt") and once on the
 teacher's solution/reasoning ("teacher_annotation") — using the same Titan embeddings
