@@ -2,20 +2,20 @@
 
 Mutates 5 seed GSM8K questions using a Bedrock-hosted Qwen3-32B teacher, generates teacher
 completions (ground truth), scores each question's difficulty by sampling K=10 completions
-from a colocated vLLM Qwen3-0.6B student and counting how many match the teacher's answer,
+from a colocated vLLM Qwen3-1.7B student and counting how many match the teacher's answer,
 embeds each sample as a concatenation of unit-norm question semantics (Bedrock Titan text
 embeddings) and a unit-norm one-hot difficulty encoding, filters out samples with malformed
 teacher completions, and
-grows the population via `novelty_search_evolution`'s novelty search engine until every
-difficulty bucket (0..K) has at least MIN_SAMPLES_PER_BUCKET accepted samples.
+grows the population via `novelty_search_evolution`'s novelty search engine until NUM_SAMPLES
+samples have been accepted.
 
 Produces `output/synthetic_distillation.parquet` and a difficulty-distribution plot.
 
 Usage:
-    PYTHONPATH=. python examples/gsm8k_distillation/run.py [--smoke-test]
+    PYTHONPATH=. python examples/gsm8k_distillation/scripts/run_novelty_search_augmentatin.py [--smoke-test]
 
 Requires AWS Bedrock credentials (standard boto3 chain) for the Qwen3-32B teacher, and a
-CUDA GPU for the colocated Qwen3-0.6B vLLM student.
+CUDA GPU for the colocated Qwen3-1.7B vLLM student.
 """
 
 from __future__ import annotations
@@ -55,7 +55,8 @@ logger = get_logger(__name__)
 # --- config ---
 
 NUM_SEEDS = 5
-MIN_SAMPLES_PER_BUCKET = 50
+NUM_SAMPLES = 8000
+NOVELTY_KNN_K = 10
 MAX_GENERATIONS_SAFETY_CAP = 300
 
 MUTATIONS_PER_PARENT = 5
@@ -65,7 +66,7 @@ NUM_CROSSOVER_SAMPLES = 5  # parent pairs sampled per generation
 SELECTION_SIZE = 15
 
 SELECTION_CONFIG = {
-    "nn-k": MIN_SAMPLES_PER_BUCKET,
+    "nn-k": NOVELTY_KNN_K,
     "distance": "cosine",
     "archive_update_prob": 0.3,
 }
@@ -73,6 +74,7 @@ SELECTION_CONFIG = {
 CHECKPOINT_EVERY_N_GENERATIONS = 10
 SYNTHETIC_DATA_PATH = OUTPUT_DIR / "synthetic_distillation.parquet"
 DIFFICULTY_PLOT_PATH = OUTPUT_DIR / "difficulty_distribution.png"
+DEFAULT_WANDB_PROJECT = "gsm8k-distillation-novelty-search"
 
 
 # --- data assembly ---
@@ -197,9 +199,9 @@ def embedding_fn(data_list: list[dict]) -> list[np.ndarray]:
 
 
 def kept_samples(population: Population) -> list[EvoSample]:
-    """Archived ∪ active samples, de-duplicated: a sample can be both at once."""
-    by_id = {s.get_id(): s for s in population.get_archive() + population.get_active()}
-    return list(by_id.values())
+    """All non-rejected samples — anything that passed every filter, whether or not it was
+    ever novelty-selected into the active pool or archived."""
+    return population.get_accepted()
 
 
 def bucket_counts(population: Population) -> np.ndarray:
@@ -210,25 +212,26 @@ def bucket_counts(population: Population) -> np.ndarray:
     return counts
 
 
-def buckets_satisfied(population: Population, min_per_bucket: int) -> bool:
-    return bool(np.all(bucket_counts(population) >= min_per_bucket))
+def enough_samples(population: Population, num_samples: int) -> bool:
+    return len(kept_samples(population)) >= num_samples
 
 
 # --- driving the loop ---
 
 
-def run_evolution(population: Population, engine: EvolutionEngine, min_per_bucket: int, max_generations: int) -> int:
+def run_evolution(population: Population, engine: EvolutionEngine, num_samples: int, max_generations: int) -> int:
     generation = 0
-    while not buckets_satisfied(population, min_per_bucket) and generation < max_generations:
+    while not enough_samples(population, num_samples) and generation < max_generations:
         result = engine.step()
         generation += 1
         counts = bucket_counts(population)
         logger.info(
-            "gen %d: candidates=%d accepted=%d selected=%d bucket_counts=%s",
+            "gen %d: candidates=%d accepted=%d selected=%d total=%d bucket_counts=%s",
             generation,
             result.num_candidates,
             result.num_accepted,
             result.num_selected,
+            len(kept_samples(population)),
             counts.tolist(),
         )
         if generation % CHECKPOINT_EVERY_N_GENERATIONS == 0:
@@ -258,15 +261,19 @@ def plot_difficulty_distribution(population: Population) -> None:
         bucket_counts(population),
         title="Synthetic dataset difficulty distribution",
         output_path=DIFFICULTY_PLOT_PATH,
-        target=MIN_SAMPLES_PER_BUCKET,
     )
 
 
 # --- main ---
 
 
-def main(smoke_test: bool = False) -> None:
-    min_per_bucket = 3 if smoke_test else MIN_SAMPLES_PER_BUCKET
+def main(
+    smoke_test: bool = False,
+    wandb: bool = False,
+    wandb_project: str = DEFAULT_WANDB_PROJECT,
+    num_samples: int = NUM_SAMPLES,
+) -> None:
+    num_samples = 6 if smoke_test else num_samples
     num_seeds = 2 if smoke_test else NUM_SEEDS
     num_mutation_samples = 2 if smoke_test else NUM_MUTATION_SAMPLES
     mutations_per_parent = 2 if smoke_test else MUTATIONS_PER_PARENT
@@ -292,8 +299,11 @@ def main(smoke_test: bool = False) -> None:
     )
     engine.set_filters([format_filter_fn])
     engine.set_selection_config(SELECTION_CONFIG)
+    if wandb:
+        engine.set_wandb_logging(project=wandb_project, config=SELECTION_CONFIG)
 
-    generations = run_evolution(population, engine, min_per_bucket, MAX_GENERATIONS_SAFETY_CAP)
+    generations = run_evolution(population, engine, num_samples, MAX_GENERATIONS_SAFETY_CAP)
+    engine.finish_wandb()
     logger.info(
         "Evolution finished after %d generations. Archive size: %d. Bucket counts: %s",
         generations,
@@ -315,5 +325,18 @@ if __name__ == "__main__":
         action="store_true",
         help="Run a tiny end-to-end pass (2 seeds, 3 samples/bucket target) to verify wiring before a full run.",
     )
+    parser.add_argument("--wandb", action="store_true", help="Log this run to Weights & Biases.")
+    parser.add_argument(
+        "--wandb-project",
+        type=str,
+        default=DEFAULT_WANDB_PROJECT,
+        help="wandb project name (used when --wandb is set).",
+    )
+    parser.add_argument(
+        "--num-samples",
+        type=int,
+        default=NUM_SAMPLES,
+        help=f"Stop once this many samples have been accepted (default: {NUM_SAMPLES}).",
+    )
     args = parser.parse_args()
-    main(smoke_test=args.smoke_test)
+    main(smoke_test=args.smoke_test, wandb=args.wandb, wandb_project=args.wandb_project, num_samples=args.num_samples)

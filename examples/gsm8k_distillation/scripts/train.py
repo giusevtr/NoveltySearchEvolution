@@ -160,6 +160,8 @@ def train(
     run_name: str | None = None,
     eval_data_path: Path | None = None,
     eval_max_samples: int | None = None,
+    eval_prompt_column: str = "prompt",
+    eval_completion_column: str = "completion",
 ) -> None:
     train_ds = load_dataset(data_path, prompt_column, completion_column, max_samples, seed)
     logger.info("Loaded %d training examples from %s", len(train_ds), data_path)
@@ -167,7 +169,7 @@ def train(
     eval_ds = None
     eval_steps = None
     if eval_data_path is not None:
-        eval_ds = load_dataset(eval_data_path, "prompt", "completion", eval_max_samples, seed)
+        eval_ds = load_dataset(eval_data_path, eval_prompt_column, eval_completion_column, eval_max_samples, seed)
         logger.info("Loaded %d eval examples from %s", len(eval_ds), eval_data_path)
         steps_per_epoch = math.ceil(
             len(train_ds) / (sft_cfg.micro_batch_size_per_gpu * sft_cfg.gradient_accumulation_steps)
@@ -214,6 +216,7 @@ def main() -> None:
     parser.add_argument("--max-samples", type=int, default=None, help="Subsample the dataset to this many rows (fixed seed).")
     parser.add_argument("--output-dir", type=Path, required=True, help="Where to save the trained LoRA adapter.")
     parser.add_argument("--sft-config", type=Path, default=DEFAULT_SFT_CONFIG_PATH)
+    parser.add_argument("--base-model", type=str, default=None, help="Override sft_config.json's base_model.")
     parser.add_argument("--peft-config", type=Path, default=DEFAULT_PEFT_CONFIG_PATH)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--smoke-test", action="store_true", help="Cap to a handful of samples/steps to verify wiring.")
@@ -221,11 +224,15 @@ def main() -> None:
     parser.add_argument("--wandb-project", type=str, default="gsm8k-distillation", help="wandb project name (used when --wandb is set).")
     parser.add_argument("--run-name", type=str, default=None, help="Run name for this training arm (used when --wandb is set).")
     parser.add_argument("--eval-data", type=Path, default=DEFAULT_EVAL_DATA_PATH, help="Path to a prompt/completion parquet file used for periodic eval during training.")
+    parser.add_argument("--eval-prompt-column", type=str, default="prompt")
+    parser.add_argument("--eval-completion-column", type=str, default="completion")
     parser.add_argument("--eval-max-samples", type=int, default=None, help="Subsample the eval dataset to this many rows (fixed seed).")
     parser.add_argument("--no-eval", action="store_true", help="Disable eval-during-training entirely.")
     args = parser.parse_args()
 
     sft_cfg = SFTHyperparams(**read_json(args.sft_config))
+    if args.base_model:
+        sft_cfg.base_model = args.base_model
     peft_cfg = PeftHyperparams(**read_json(args.peft_config))
 
     max_samples = args.max_samples
@@ -250,6 +257,8 @@ def main() -> None:
         run_name=args.run_name,
         eval_data_path=None if args.no_eval else args.eval_data,
         eval_max_samples=eval_max_samples,
+        eval_prompt_column=args.eval_prompt_column,
+        eval_completion_column=args.eval_completion_column,
     )
 
 

@@ -1,6 +1,6 @@
 """Annotate ground-truth GSM8K training questions with teacher-model completions.
 
-Mirrors run.py's synthetic-arm schema (question/teacher_completion/final_answer) so the
+Mirrors run_novelty_search_augmentatin.py's synthetic-arm schema (question/teacher_completion/final_answer) so the
 ground-truth arm can be trained with the same completion style as the synthetic arm, isolating
 the question-generation process (novelty search vs. real questions) as the sole difference
 between the two arms.
@@ -44,6 +44,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA_PATH)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--output-basename", type=str, default=OUTPUT_BASENAME)
     parser.add_argument("--limit", type=int, default=None, help="Only annotate a random sample of this many rows.")
     parser.add_argument("--batch-size", type=int, default=50)
     parser.add_argument("--seed", type=int, default=0)
@@ -63,7 +64,7 @@ def main() -> None:
         }
     )
 
-    parquet_path, jsonl_path = write_frame(out, args.output_dir, OUTPUT_BASENAME)
+    parquet_path, jsonl_path = write_frame(out, args.output_dir, args.output_basename)
 
     print(f"=== Done. Annotated {len(out)} rows. Wrote {jsonl_path} and {parquet_path} ===")
 

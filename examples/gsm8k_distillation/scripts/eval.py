@@ -46,8 +46,11 @@ class ParsingErrorCounter:
             self.num_parsing_errors += 1
 
 
-def generate_student(questions: list[str], k: int, lora_path: str | None) -> list[list[str]]:
-    student = StudentClient(StudentConfig(lora_path=lora_path))
+def generate_student(questions: list[str], k: int, lora_path: str | None, base_model: str | None = None) -> list[list[str]]:
+    config_kwargs = {"lora_path": lora_path}
+    if base_model:
+        config_kwargs["name"] = base_model
+    student = StudentClient(StudentConfig(**config_kwargs))
     student.load()
     return student_solve(student, questions, n=k)
 
@@ -59,12 +62,19 @@ def generate_teacher(questions: list[str], k: int) -> list[list[str]]:
 
 
 def evaluate(
-    df: pd.DataFrame, k: int, mode: str, lora_path: str | None, error_counter: ParsingErrorCounter
+    df: pd.DataFrame,
+    k: int,
+    mode: str,
+    lora_path: str | None,
+    error_counter: ParsingErrorCounter,
+    base_model: str | None = None,
 ) -> pd.DataFrame:
     questions = df["prompt"].tolist()
     ground_truth = df["completion"].tolist()
 
-    all_samples = generate_student(questions, k, lora_path) if mode == "student" else generate_teacher(questions, k)
+    all_samples = (
+        generate_student(questions, k, lora_path, base_model) if mode == "student" else generate_teacher(questions, k)
+    )
 
     rows = []
     for samples, gt in zip(all_samples, ground_truth):
@@ -101,6 +111,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--mode", choices=["student", "teacher"], required=True)
     parser.add_argument("--lora-path", type=str, default=None, help="LoRA adapter checkpoint (student mode only).")
+    parser.add_argument("--base-model", type=str, default=None, help="Override the student base model (student mode only).")
     parser.add_argument("--k", type=int, default=1, help="Samples drawn per question.")
     parser.add_argument("--limit", type=int, default=None, help="Evaluate only the first N val questions.")
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA_PATH)
@@ -111,6 +122,8 @@ def main() -> None:
 
     if args.mode == "teacher" and args.lora_path is not None:
         parser.error("--lora-path is not valid with --mode teacher")
+    if args.mode == "teacher" and args.base_model is not None:
+        parser.error("--base-model is not valid with --mode teacher")
 
     limit = cap_limit(args.limit, SMOKE_TEST_NUM_QUESTIONS) if args.smoke_test else args.limit
     df = load_frame(args.data)
@@ -120,13 +133,13 @@ def main() -> None:
     logger.info("Evaluating %s (mode=%s, lora_path=%s) on %d questions, k=%d", args.run_name, args.mode, args.lora_path, len(df), args.k)
 
     error_counter = ParsingErrorCounter()
-    annotated = evaluate(df, args.k, args.mode, args.lora_path, error_counter)
+    annotated = evaluate(df, args.k, args.mode, args.lora_path, error_counter, args.base_model)
 
     output_dir = args.output_dir or (OUTPUT_DIR / "eval" / args.run_name)
     output_dir.mkdir(parents=True, exist_ok=True)
     annotated.to_json(output_dir / "annotated.jsonl", orient="records", lines=True)
 
-    model = StudentConfig().name if args.mode == "student" else "teacher (Bedrock)"
+    model = (args.base_model or StudentConfig().name) if args.mode == "student" else "teacher (Bedrock)"
     report = build_report(annotated, args.k, error_counter, args.mode, model, args.lora_path, args.run_name)
     write_json(report, output_dir / "report.json")
 

@@ -1,13 +1,13 @@
 """Baseline synthetic-data generator using NVIDIA NeMo Data Designer.
 
 Non-novelty-search comparison arm: generates flat, independent grade-school math questions
-conditioned on the same 5 seed GSM8K questions used by run.py (embedded as static few-shot
+conditioned on the same 5 seed GSM8K questions used by run_novelty_search_augmentatin.py (embedded as static few-shot
 examples) plus Data Designer's native diversity mechanism (SamplerColumnConfig columns for topic
 and step-count, sampled per record and referenced in the generation prompt via Jinja) — rather
 than novelty search's iterative single-parent mutation + selection loop. Generation and solving
-both go through the same Bedrock-hosted Qwen3-32B teacher as run.py (routed through a local
+both go through the same Bedrock-hosted Qwen3-32B teacher as run_novelty_search_augmentatin.py (routed through a local
 OpenAI-compatible proxy, clients/teacher_openai_proxy.py, so Data Designer can call it), and the
-teacher_completion prompt/inference params are imported directly from run.py so they can't drift
+teacher_completion prompt/inference params are imported directly from run_novelty_search_augmentatin.py so they can't drift
 out of sync with novelty search's teacher-solve step.
 
 Produces output/baseline_nemo_distillation.{parquet,jsonl}, schema-compatible with
@@ -18,7 +18,7 @@ output/synthetic_distillation.parquet (question/teacher_completion/final_answer)
         --output-dir checkpoints/baseline_nemo
 
 Usage:
-    PYTHONPATH=. python examples/gsm8k_distillation/baseline_nemo.py [--smoke-test] [--num-records N]
+    PYTHONPATH=. python examples/gsm8k_distillation/baseline_nemo.py [--smoke-test] [--num-samples N]
 
 Requires AWS Bedrock credentials (standard boto3 chain) and `pip install data-designer fastapi
 uvicorn`.
@@ -57,11 +57,11 @@ from examples.gsm8k_distillation.novelty_search.prompts import (
     build_solve_prompt,
     extract_gsm8k_answer,
 )
-from examples.gsm8k_distillation.run import NUM_SEEDS
+from examples.gsm8k_distillation.scripts.run_novelty_search_augmentatin import NUM_SEEDS
 
 logger = get_logger(__name__)
 
-DEFAULT_NUM_RECORDS = 1200
+DEFAULT_NUM_SAMPLES = 8000
 SMOKE_TEST_NUM_RECORDS = 4
 OUTPUT_BASENAME = "baseline_nemo_distillation"
 DIFFICULTY_PLOT_PATH = OUTPUT_DIR / "nemo_difficulty_distribution.png"
@@ -175,7 +175,7 @@ def generate_dataset(seed_questions: list[str], num_records: int, proxy_port: in
 
 
 def score_student_difficulty(frame: pd.DataFrame) -> pd.DataFrame:
-    """Score each question's difficulty by sampling the student K times, matching run.py exactly."""
+    """Score each question's difficulty by sampling the student K times, matching run_novelty_search_augmentatin.py exactly."""
     student = StudentClient(StudentConfig())
     student.load()
     difficulties = score_difficulty(student, frame["question"].tolist(), frame["final_answer"].tolist())
@@ -195,7 +195,7 @@ def plot_nemo_difficulty_distribution(frame: pd.DataFrame) -> None:
 def main(smoke_test: bool = False, num_records: int | None = None) -> None:
     num_seeds = 2 if smoke_test else NUM_SEEDS
     if num_records is None:
-        num_records = SMOKE_TEST_NUM_RECORDS if smoke_test else DEFAULT_NUM_RECORDS
+        num_records = SMOKE_TEST_NUM_RECORDS if smoke_test else DEFAULT_NUM_SAMPLES
 
     seed_questions = load_seed_questions(GSM8K_TRAIN_PARQUET, n=num_seeds)
     logger.info("Loaded %d seed questions", len(seed_questions))
@@ -227,10 +227,11 @@ if __name__ == "__main__":
         help="Run a tiny end-to-end pass (2 seeds, 4 generated questions) to verify wiring before a full run.",
     )
     parser.add_argument(
-        "--num-records",
+        "--num-samples",
         type=int,
         default=None,
-        help=f"Number of questions to generate (default: {DEFAULT_NUM_RECORDS}, or {SMOKE_TEST_NUM_RECORDS} in --smoke-test).",
+        dest="num_records",
+        help=f"Number of questions to generate (default: {DEFAULT_NUM_SAMPLES}, or {SMOKE_TEST_NUM_RECORDS} in --smoke-test).",
     )
     args = parser.parse_args()
     main(smoke_test=args.smoke_test, num_records=args.num_records)

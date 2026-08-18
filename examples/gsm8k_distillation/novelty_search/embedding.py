@@ -10,10 +10,19 @@ solved (reasoning path), not just novelty in the question text itself.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
+from botocore.config import Config as BotocoreConfig
 from langchain_aws import BedrockEmbeddings
 
 DEFAULT_MODEL_ID = "amazon.titan-embed-text-v2:0"
+
+# Titan has no batch embedding API, so BedrockEmbeddings.embed_documents() calls embed_query()
+# once per text, serially. question_embedding_fn() instead fans those calls out over a thread
+# pool; the connection pool is sized to match so botocore doesn't churn through discarded/
+# reopened connections (same rationale as TeacherClient.generate()'s max_pool_connections).
+MAX_EMBEDDING_WORKERS = 20
 
 _embeddings_client = None
 
@@ -21,18 +30,28 @@ _embeddings_client = None
 def _get_embeddings_client(model_id: str) -> BedrockEmbeddings:
     global _embeddings_client
     if _embeddings_client is None:
-        _embeddings_client = BedrockEmbeddings(model_id=model_id)
+        _embeddings_client = BedrockEmbeddings(
+            model_id=model_id,
+            config=BotocoreConfig(
+                max_pool_connections=MAX_EMBEDDING_WORKERS,
+                retries={"mode": "adaptive", "max_attempts": 10},
+            ),
+        )
     return _embeddings_client
 
 
 def question_embedding_fn(questions: list[str], model_id: str = DEFAULT_MODEL_ID) -> np.ndarray:
-    """Compute unit-norm semantic embeddings for a batch of questions via Bedrock.
+    """Compute unit-norm semantic embeddings for a batch of questions via Bedrock, in parallel.
 
     Returns:
         (N, D) array of unit-norm rows.
     """
+    if not questions:
+        return np.empty((0, 0), dtype=np.float64)
     client = _get_embeddings_client(model_id)
-    vectors = np.asarray(client.embed_documents(questions), dtype=np.float64)
+    with ThreadPoolExecutor(max_workers=min(MAX_EMBEDDING_WORKERS, len(questions))) as executor:
+        raw_vectors = list(executor.map(client.embed_query, questions))
+    vectors = np.asarray(raw_vectors, dtype=np.float64)
     norms = np.linalg.norm(vectors, axis=1, keepdims=True)
     norms[norms == 0] = 1.0
     return vectors / norms

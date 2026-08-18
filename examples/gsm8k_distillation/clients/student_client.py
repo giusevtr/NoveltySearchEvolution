@@ -2,7 +2,7 @@
 
 Adapted from temp/utils/vllm_inference_server/model_manager.py::ModelManager, trimmed to
 just load()/generate() — no LoRA, no teacher-forced perplexity scoring (not needed here;
-difficulty is measured by sampling, see novelty_search/embedding.py and run.py).
+difficulty is measured by sampling, see novelty_search/embedding.py and run_novelty_search_augmentatin.py).
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from vllm import LLM, SamplingParams  # type: ignore
 from vllm.lora.request import LoRARequest  # type: ignore
 
-DEFAULT_MODEL_NAME = "Qwen/Qwen3-0.6B"
+DEFAULT_MODEL_NAME = "Qwen/Qwen3-1.7B"
 
 
 class ModelLoadError(RuntimeError):

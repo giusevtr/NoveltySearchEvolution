@@ -14,14 +14,14 @@ For each component this produces:
     overlaid.
 Text is embedded with the same semantic embedding novelty search itself uses for selection
 (novelty_search/embedding.py::question_embedding_fn, Bedrock Titan text embeddings), and distances
-use cosine, matching run.py's own SELECTION_CONFIG distance metric — so "diversity" here means the
+use cosine, matching run_novelty_search_augmentatin.py's own SELECTION_CONFIG distance metric — so "diversity" here means the
 same thing it means to the novelty search engine.
 
 Usage:
     PYTHONPATH=. python examples/gsm8k_distillation/diversity_report.py [--smoke-test]
 
 Requires AWS Bedrock credentials (standard boto3 chain), and
-output/synthetic_distillation.parquet (produced by run.py),
+output/synthetic_distillation.parquet (produced by run_novelty_search_augmentatin.py),
 output/baseline_nemo_distillation.parquet (produced by baseline_nemo.py), and
 data/gsm8k_train_teacher_annotated.parquet (produced by scripts/annotate_groundtruth.py) to
 already exist.
@@ -40,7 +40,6 @@ sys.path.append(str(Path(__file__).resolve().parent.parent.parent))
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from scipy.spatial.distance import cdist, pdist
 from sklearn.manifold import TSNE
 
 from examples.gsm8k_distillation.common.files import load_frame, require_file, write_json
@@ -48,6 +47,7 @@ from examples.gsm8k_distillation.common.logging_utils import get_logger
 from examples.gsm8k_distillation.common.paths import DATA_DIR, OUTPUT_DIR
 from examples.gsm8k_distillation.common.plots import save_figure
 from examples.gsm8k_distillation.novelty_search.embedding import question_embedding_fn
+from novelty_search_evolution import average_pairwise_distance, mean_min_distance_to_reference, vendi_score
 
 logger = get_logger(__name__)
 
@@ -58,7 +58,6 @@ DEFAULT_OUTPUT = OUTPUT_DIR / "diversity_tsne.png"
 DEFAULT_METRICS_OUTPUT = OUTPUT_DIR / "diversity_metrics.json"
 DEFAULT_CACHE_DIR = OUTPUT_DIR / "embedding_cache"
 
-DEFAULT_NUM_GROUNDTRUTH_SAMPLES = 1200
 SMOKE_TEST_NUM_SAMPLES = 20
 
 COMPONENTS = ("prompt", "teacher_annotation")
@@ -104,6 +103,10 @@ def embed_components(df: pd.DataFrame, tag: str, cache_dir: Path, refresh: bool 
     }
 
 
+def _dataset_size(path: Path) -> int:
+    return len(load_frame(path))
+
+
 def compute_tsne_2d(embeddings: np.ndarray) -> np.ndarray:
     if len(embeddings) < 3:
         raise ValueError(f"t-SNE needs at least 3 points, got {len(embeddings)}")
@@ -112,38 +115,26 @@ def compute_tsne_2d(embeddings: np.ndarray) -> np.ndarray:
     return TSNE(n_components=2, random_state=0, perplexity=perplexity).fit_transform(embeddings)
 
 
-def average_pairwise_distance(embeddings: np.ndarray) -> float:
-    """Mean cosine distance over all pairs — higher means more internally diverse."""
-    if len(embeddings) < 2:
-        raise ValueError(f"need at least 2 embeddings to average pairwise distance, got {len(embeddings)}")
-    return float(np.mean(pdist(embeddings, metric="cosine")))
-
-
-def mean_min_distance_to_reference(embeddings: np.ndarray, reference_embeddings: np.ndarray) -> float:
-    """For each reference (ground-truth) embedding, the cosine distance to its nearest neighbor
-    in `embeddings`, averaged over all reference embeddings — lower means every ground-truth
-    point has some synthetic point nearby, i.e. better coverage of the reference distribution."""
-    if len(embeddings) == 0 or len(reference_embeddings) == 0:
-        raise ValueError("both embeddings and reference_embeddings must be non-empty")
-    dists = cdist(reference_embeddings, embeddings, metric="cosine")
-    return float(dists.min(axis=1).mean())
-
-
 def compute_component_metrics(gt_embeddings: np.ndarray, novelty_embeddings: np.ndarray, nemo_embeddings: np.ndarray) -> dict:
     return {
         "groundtruth": {
             "n": len(gt_embeddings),
             "avg_pairwise_distance": average_pairwise_distance(gt_embeddings),
+            "vendi_score": vendi_score(gt_embeddings),
         },
         "novelty_search": {
             "n": len(novelty_embeddings),
             "avg_pairwise_distance": average_pairwise_distance(novelty_embeddings),
+            "vendi_score": vendi_score(novelty_embeddings),
             "coverage_distance_to_groundtruth": mean_min_distance_to_reference(novelty_embeddings, gt_embeddings),
+            "coverage_distance_from_groundtruth": mean_min_distance_to_reference(gt_embeddings, novelty_embeddings),
         },
         "nemo_baseline": {
             "n": len(nemo_embeddings),
             "avg_pairwise_distance": average_pairwise_distance(nemo_embeddings),
+            "vendi_score": vendi_score(nemo_embeddings),
             "coverage_distance_to_groundtruth": mean_min_distance_to_reference(nemo_embeddings, gt_embeddings),
+            "coverage_distance_from_groundtruth": mean_min_distance_to_reference(gt_embeddings, nemo_embeddings),
         },
     }
 
@@ -162,10 +153,10 @@ def print_component_metrics_summary(component: str, component_metrics: dict) -> 
     lines = [
         "",
         f"--- {component} ---",
-        f"{'dataset':<16}{'n':>6}{'avg pairwise dist':>20}{'coverage dist to GT':>22}",
-        f"{'groundtruth':<16}{gt['n']:>6}{gt['avg_pairwise_distance']:>20.4f}{'-':>22}",
-        f"{'novelty_search':<16}{novelty['n']:>6}{novelty['avg_pairwise_distance']:>20.4f}{novelty['coverage_distance_to_groundtruth']:>22.4f}",
-        f"{'nemo_baseline':<16}{nemo['n']:>6}{nemo['avg_pairwise_distance']:>20.4f}{nemo['coverage_distance_to_groundtruth']:>22.4f}",
+        f"{'dataset':<16}{'n':>6}{'avg pairwise dist':>20}{'vendi':>10}{'coverage dist to GT':>22}{'coverage dist from GT':>24}",
+        f"{'groundtruth':<16}{gt['n']:>6}{gt['avg_pairwise_distance']:>20.4f}{gt['vendi_score']:>10.2f}{'-':>22}{'-':>24}",
+        f"{'novelty_search':<16}{novelty['n']:>6}{novelty['avg_pairwise_distance']:>20.4f}{novelty['vendi_score']:>10.2f}{novelty['coverage_distance_to_groundtruth']:>22.4f}{novelty['coverage_distance_from_groundtruth']:>24.4f}",
+        f"{'nemo_baseline':<16}{nemo['n']:>6}{nemo['avg_pairwise_distance']:>20.4f}{nemo['vendi_score']:>10.2f}{nemo['coverage_distance_to_groundtruth']:>22.4f}{nemo['coverage_distance_from_groundtruth']:>24.4f}",
         "",
     ]
     if novelty["avg_pairwise_distance"] > nemo["avg_pairwise_distance"]:
@@ -174,12 +165,24 @@ def print_component_metrics_summary(component: str, component_metrics: dict) -> 
         lines.append("The NeMo baseline is more internally diverse than novelty search.")
     else:
         lines.append("Novelty search and the NeMo baseline are equally diverse.")
+    if novelty["vendi_score"] > nemo["vendi_score"]:
+        lines.append("Novelty search has a higher Vendi score (more effective distinct samples).")
+    elif nemo["vendi_score"] > novelty["vendi_score"]:
+        lines.append("The NeMo baseline has a higher Vendi score (more effective distinct samples).")
+    else:
+        lines.append("Novelty search and the NeMo baseline have equal Vendi scores.")
     if novelty["coverage_distance_to_groundtruth"] < nemo["coverage_distance_to_groundtruth"]:
         lines.append("Novelty search has lower mean min-distance to ground truth (better coverage).")
     elif nemo["coverage_distance_to_groundtruth"] < novelty["coverage_distance_to_groundtruth"]:
         lines.append("The NeMo baseline has lower mean min-distance to ground truth (better coverage).")
     else:
         lines.append("Novelty search and the NeMo baseline cover ground truth equally well.")
+    if novelty["coverage_distance_from_groundtruth"] < nemo["coverage_distance_from_groundtruth"]:
+        lines.append("Novelty search stays closer to the ground-truth manifold (better precision).")
+    elif nemo["coverage_distance_from_groundtruth"] < novelty["coverage_distance_from_groundtruth"]:
+        lines.append("The NeMo baseline stays closer to the ground-truth manifold (better precision).")
+    else:
+        lines.append("Novelty search and the NeMo baseline are equally close to the ground-truth manifold.")
     print("\n".join(lines))
 
 
@@ -216,7 +219,6 @@ def main() -> None:
     parser.add_argument("--synthetic-data", type=Path, default=DEFAULT_SYNTHETIC_DATA)
     parser.add_argument("--nemo-data", type=Path, default=DEFAULT_NEMO_DATA)
     parser.add_argument("--groundtruth-data", type=Path, default=DEFAULT_GROUNDTRUTH_DATA)
-    parser.add_argument("--num-groundtruth-samples", type=int, default=DEFAULT_NUM_GROUNDTRUTH_SAMPLES)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument("--metrics-output", type=Path, default=DEFAULT_METRICS_OUTPUT)
     parser.add_argument("--cache-dir", type=Path, default=DEFAULT_CACHE_DIR)
@@ -232,22 +234,30 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    require_file(args.synthetic_data, "run run.py first to generate it.")
+    require_file(args.synthetic_data, "run run_novelty_search_augmentatin.py first to generate it.")
     require_file(args.nemo_data, "run baseline_nemo.py first to generate it.")
     require_file(args.groundtruth_data, "run scripts/annotate_groundtruth.py first to generate it.")
 
-    num_groundtruth_samples = SMOKE_TEST_NUM_SAMPLES if args.smoke_test else args.num_groundtruth_samples
-    num_synthetic_samples = SMOKE_TEST_NUM_SAMPLES if args.smoke_test else None
+    if args.smoke_test:
+        num_samples = SMOKE_TEST_NUM_SAMPLES
+    else:
+        dataset_sizes = {
+            "groundtruth": _dataset_size(args.groundtruth_data),
+            "novelty_search": _dataset_size(args.synthetic_data),
+            "nemo_baseline": _dataset_size(args.nemo_data),
+        }
+        num_samples = min(dataset_sizes.values())
+        logger.info("Dataset sizes %s; capping all three to %d samples", dataset_sizes, num_samples)
 
-    gt_df = load_frame(args.groundtruth_data, n=num_groundtruth_samples)
+    gt_df = load_frame(args.groundtruth_data, n=num_samples)
     logger.info("Loaded %d ground-truth rows", len(gt_df))
     gt_embeds = embed_components(gt_df, tag="groundtruth", cache_dir=args.cache_dir, refresh=args.refresh_cache)
 
-    novelty_df = load_frame(args.synthetic_data, n=num_synthetic_samples)
+    novelty_df = load_frame(args.synthetic_data, n=num_samples)
     logger.info("Loaded %d novelty-search synthetic rows", len(novelty_df))
     novelty_embeds = embed_components(novelty_df, tag="novelty", cache_dir=args.cache_dir, refresh=args.refresh_cache)
 
-    nemo_df = load_frame(args.nemo_data, n=num_synthetic_samples)
+    nemo_df = load_frame(args.nemo_data, n=num_samples)
     logger.info("Loaded %d NeMo baseline synthetic rows", len(nemo_df))
     nemo_embeds = embed_components(nemo_df, tag="nemo", cache_dir=args.cache_dir, refresh=args.refresh_cache)
 

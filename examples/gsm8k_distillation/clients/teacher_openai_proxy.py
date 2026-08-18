@@ -1,7 +1,7 @@
 """Minimal OpenAI-compatible chat-completions proxy in front of TeacherClient.
 
 Lets NeMo Data Designer (which speaks OpenAI's chat-completions HTTP API) call the same
-Bedrock-hosted Qwen3-32B teacher used by run.py, instead of a separate NVIDIA-hosted model.
+Bedrock-hosted Qwen3-32B teacher used by run_novelty_search_augmentatin.py, instead of a separate NVIDIA-hosted model.
 """
 
 from __future__ import annotations

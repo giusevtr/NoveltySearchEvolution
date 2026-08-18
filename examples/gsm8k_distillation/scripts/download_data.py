@@ -2,12 +2,12 @@
 
 Downloads `openai/gsm8k` (`main` config) via Hugging Face `datasets`, maps each example to
 `{"prompt": question, "completion": answer}` (same transform used in `sft_training.ipynb`),
-and writes `data/gsm8k_train.parquet` / `data/gsm8k_val.parquet` alongside this script — the
-paths `common/paths.py` exposes and every other script in this example reads from. A JSONL
-copy of each split is written next to the parquet for eyeballing.
+and writes `gsm8k_train.parquet` / `gsm8k_val.parquet` to `common/paths.py`'s `DATA_DIR` — the
+paths every other script in this example reads from. A JSONL copy of each split is written
+next to the parquet for eyeballing.
 
 Usage:
-    PYTHONPATH=. python examples/gsm8k_distillation/download_data.py [--limit N]
+    PYTHONPATH=. python examples/gsm8k_distillation/scripts/download_data.py [--limit N]
 """
 
 from __future__ import annotations
@@ -20,12 +20,12 @@ import pandas as pd
 from datasets import load_dataset
 
 from examples.gsm8k_distillation.common.files import write_frame
+from examples.gsm8k_distillation.common.paths import DATA_DIR
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
-THIS_DIR = Path(__file__).parent
-DEFAULT_OUTPUT_DIR = THIS_DIR / "data"
+DEFAULT_OUTPUT_DIR = DATA_DIR
 
 
 def to_prompt_completion(example: dict) -> dict:
