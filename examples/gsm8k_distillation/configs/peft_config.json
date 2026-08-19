@@ -1,7 +1,7 @@
 {
   "enabled": true,
-  "rank": 16,
-  "alpha": 32,
-  "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj"],
+  "rank": 32,
+  "alpha": 64,
+  "target_modules": ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"],
   "task_type": "CAUSAL_LM"
 }

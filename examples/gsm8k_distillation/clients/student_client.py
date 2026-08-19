@@ -26,7 +26,7 @@ class StudentConfig:
     gpu_memory_utilization: float = 0.6
     max_model_len: int = 2048
     lora_path: str | None = None
-    max_lora_rank: int = 16
+    max_lora_rank: int = 32
 
 
 class StudentClient:

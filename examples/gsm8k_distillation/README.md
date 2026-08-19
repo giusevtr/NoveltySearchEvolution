@@ -10,12 +10,11 @@ synthetic, real ground truth, and a NeMo Data Designer flat-synthetic baseline. 
 clearest result is on diversity: scored with the Vendi score (an effective count of
 distinct samples), novelty search's question and reasoning embeddings are ~2.4–2.7x more
 diverse than the flat baseline's, and still cover the ground-truth distribution more
-closely (lower mean nearest-neighbor distance) on both axes. Accuracy tells a noisier
-story at this scale — ground truth closes the most gap (14.1%), with novelty search
-(4.7%) and the NeMo baseline (7.4%) both closing much smaller and similarly-sized shares;
-with one SFT epoch on a 1.7B student, all three arms move accuracy by only a few points
-over the untrained base, so we don't read much into the ordering between the two
-synthetic arms.
+closely (lower mean nearest-neighbor distance) on both axes. Accuracy shows the same
+ordering: ground truth closes the most gap (34.8%), followed by the NeMo baseline
+(28.5%) and novelty search (23.8%). Under a rank-32 LoRA over attention+MLP trained for
+3 epochs, all three arms now close a substantial share of the teacher/student gap,
+rather than the marginal movement seen with a 1-epoch, rank-16 run.
 
 ## 1. Research questions
 
@@ -86,8 +85,9 @@ Each arm is distilled independently via LoRA SFT (`train.py`) with identical
 hyperparameters (`configs/`):
 
 - Base model: `Qwen/Qwen3-1.7B`
-- LoRA: rank 16, alpha 32, target modules `q_proj/k_proj/v_proj/o_proj`
-- Learning rate 1e-5, bfloat16, 1 epoch
+- LoRA: rank 32, alpha 64, target modules
+  `q_proj/k_proj/v_proj/o_proj/gate_proj/up_proj/down_proj`
+- Learning rate 2e-4, bfloat16, 3 epochs, cosine LR schedule, 3% warmup
 
 ### 2.4 Evaluation
 
@@ -109,17 +109,20 @@ gap_closure = (distilled_accuracy − base_accuracy) / (teacher_accuracy − bas
 | arm | accuracy | gap closure |
 |---|---:|---:|
 | base | 0.7483 | – |
-| synthetic | 0.7574 | 4.7% |
-| groundtruth | 0.7756 | 14.1% |
-| nemo | 0.7627 | 7.4% |
+| synthetic | 0.7945 | 23.8% |
+| groundtruth | 0.8158 | 34.8% |
+| nemo | 0.8036 | 28.5% |
 | teacher | 0.9424 | – |
 
-With a larger 1.7B student and one SFT epoch, all three arms move accuracy only a few
-points above the untrained base (0.7483). Ground truth closes the most gap (14.1%);
-novelty-search synthetic (4.7%) and the flat NeMo baseline (7.4%) both close much smaller
-and similarly modest shares. These deltas are small enough at k=1 single-sample eval that
-we don't read much into the ordering between the two synthetic arms — §3.3's diversity
-metrics are the more decisive comparison between them.
+With a rank-32 LoRA over attention+MLP trained for 3 epochs, all three arms now close a
+substantial share of the teacher/student gap above the untrained base (0.7483). Ground
+truth leads (0.8158, 34.8% gap closure), followed by the NeMo baseline (0.8036, 28.5%)
+and novelty-search synthetic (0.7945, 23.8%) — the same ordering as the earlier
+1-epoch/rank-16 run, but with far larger and now clearly separated gap-closure shares
+rather than a near-tie. This is still a single k=1 eval run per arm, so we'd want repeat
+runs before treating the exact ranking as settled, but the gap between arms is no longer
+small enough to dismiss — §3.3's diversity metrics remain the more decisive comparison
+between the two synthetic arms specifically.
 
 ### 3.2 Difficulty coverage
 
@@ -182,12 +185,13 @@ coverage of the ground-truth distribution. The difficulty-distribution compariso
 embedding keeps its samples much more evenly spread across easy and hard buckets than
 NeMo's unconstrained sampling, which collapses heavily onto the easiest bucket.
 
-Accuracy is a noisier signal at this model scale. Ground truth still leads on gap
-closure (14.1%), but with a 1.7B student and a single SFT epoch, all three arms move
-accuracy only a few points over the untrained base, and novelty search (4.7%) and the
-NeMo baseline (7.4%) land close enough together that we don't treat their relative order
-as meaningful — a clear case of large, robust diversity gains not (yet) translating into
-a correspondingly large downstream accuracy gap at this scale. The crossover operator —
+Accuracy is more differentiated under the updated training recipe. Ground truth still
+leads on gap closure (34.8%), with the NeMo baseline (28.5%) and novelty search (23.8%)
+both closing large but smaller shares, in the same order as the earlier 1-epoch/rank-16
+run. The gap between the two synthetic arms is now wide enough to be worth noting rather
+than dismissing as noise, though it's still a single k=1 eval run per arm — a case of
+large, robust diversity gains only partly translating into a correspondingly large
+downstream accuracy gap at this scale. The crossover operator —
 blending two parents' arithmetic techniques rather than paraphrasing a single parent —
 again contributed roughly a third of the final synthetic dataset (2603/8011), suggesting
 technique-blending remains a meaningful source of the novelty search arm's diversity

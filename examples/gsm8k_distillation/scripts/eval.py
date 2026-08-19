@@ -46,13 +46,15 @@ class ParsingErrorCounter:
             self.num_parsing_errors += 1
 
 
-def generate_student(questions: list[str], k: int, lora_path: str | None, base_model: str | None = None) -> list[list[str]]:
+def generate_student(
+    questions: list[str], k: int, lora_path: str | None, base_model: str | None = None, temperature: float = 0.0
+) -> list[list[str]]:
     config_kwargs = {"lora_path": lora_path}
     if base_model:
         config_kwargs["name"] = base_model
     student = StudentClient(StudentConfig(**config_kwargs))
     student.load()
-    return student_solve(student, questions, n=k)
+    return student_solve(student, questions, n=k, temperature=temperature)
 
 
 def generate_teacher(questions: list[str], k: int) -> list[list[str]]:
@@ -68,12 +70,15 @@ def evaluate(
     lora_path: str | None,
     error_counter: ParsingErrorCounter,
     base_model: str | None = None,
+    temperature: float = 0.0,
 ) -> pd.DataFrame:
     questions = df["prompt"].tolist()
     ground_truth = df["completion"].tolist()
 
     all_samples = (
-        generate_student(questions, k, lora_path, base_model) if mode == "student" else generate_teacher(questions, k)
+        generate_student(questions, k, lora_path, base_model, temperature)
+        if mode == "student"
+        else generate_teacher(questions, k)
     )
 
     rows = []
@@ -113,6 +118,13 @@ def main() -> None:
     parser.add_argument("--lora-path", type=str, default=None, help="LoRA adapter checkpoint (student mode only).")
     parser.add_argument("--base-model", type=str, default=None, help="Override the student base model (student mode only).")
     parser.add_argument("--k", type=int, default=1, help="Samples drawn per question.")
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.0,
+        help="Student sampling temperature (student mode only; default 0.0 = greedy, for a "
+        "deterministic headline accuracy number). Ignored in teacher mode.",
+    )
     parser.add_argument("--limit", type=int, default=None, help="Evaluate only the first N val questions.")
     parser.add_argument("--data", type=Path, default=DEFAULT_DATA_PATH)
     parser.add_argument("--run-name", type=str, required=True, help="Namespaces output under output/eval/<run-name>/.")
@@ -133,7 +145,7 @@ def main() -> None:
     logger.info("Evaluating %s (mode=%s, lora_path=%s) on %d questions, k=%d", args.run_name, args.mode, args.lora_path, len(df), args.k)
 
     error_counter = ParsingErrorCounter()
-    annotated = evaluate(df, args.k, args.mode, args.lora_path, error_counter, args.base_model)
+    annotated = evaluate(df, args.k, args.mode, args.lora_path, error_counter, args.base_model, args.temperature)
 
     output_dir = args.output_dir or (OUTPUT_DIR / "eval" / args.run_name)
     output_dir.mkdir(parents=True, exist_ok=True)

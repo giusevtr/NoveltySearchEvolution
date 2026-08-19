@@ -45,13 +45,16 @@ def teacher_solve(
 
 
 def student_solve(
-    student: StudentClient, questions: list[str], n: int = K_STUDENT_SAMPLES
+    student: StudentClient,
+    questions: list[str],
+    n: int = K_STUDENT_SAMPLES,
+    temperature: float = STUDENT_SOLVE_TEMPERATURE,
 ) -> list[list[str]]:
     """`n` student completions per question."""
     return student.generate(
         [build_solve_prompt(q) for q in questions],
         n=n,
-        temperature=STUDENT_SOLVE_TEMPERATURE,
+        temperature=temperature,
         max_tokens=SOLVE_MAX_TOKENS,
     )
 

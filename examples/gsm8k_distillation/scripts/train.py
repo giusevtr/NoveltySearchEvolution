@@ -17,7 +17,6 @@ Requires a CUDA GPU. No vLLM engine should be loaded on the same GPU while this 
 from __future__ import annotations
 
 import argparse
-import math
 import os
 from pathlib import Path
 
@@ -40,7 +39,6 @@ DEFAULT_SFT_CONFIG_PATH = CONFIG_DIR / "sft_config.json"
 DEFAULT_PEFT_CONFIG_PATH = CONFIG_DIR / "peft_config.json"
 DEFAULT_EVAL_DATA_PATH = GSM8K_VAL_PARQUET
 
-EVALS_PER_EPOCH = 4
 SMOKE_TEST_NUM_SAMPLES = 8
 SMOKE_TEST_MAX_STEPS = 2
 
@@ -63,6 +61,8 @@ class SFTHyperparams(BaseModel):
     gradient_accumulation_steps: int = Field(default=8, ge=1)
     learning_rate: float = Field(default=1e-5, gt=0.0)
     total_epochs: int = Field(default=1, ge=1)
+    lr_scheduler_type: str = "linear"
+    warmup_ratio: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class PeftHyperparams(BaseModel):
@@ -90,7 +90,7 @@ def build_sft_config(
     max_steps: int | None = None,
     report_to: str = "none",
     run_name: str | None = None,
-    eval_steps: int | None = None,
+    eval_enabled: bool = False,
 ) -> SFTConfig:
     kwargs = dict(
         output_dir=output_dir,
@@ -98,14 +98,15 @@ def build_sft_config(
         gradient_accumulation_steps=cfg.gradient_accumulation_steps,
         learning_rate=cfg.learning_rate,
         num_train_epochs=cfg.total_epochs,
+        lr_scheduler_type=cfg.lr_scheduler_type,
+        warmup_ratio=cfg.warmup_ratio,
         max_length=cfg.max_seq_length,
         gradient_checkpointing=cfg.gradient_checkpointing,
         bf16=(_DTYPE_MAP[cfg.dtype] == torch.bfloat16),
         report_to=report_to,
     )
-    if eval_steps is not None:
-        kwargs["eval_strategy"] = "steps"
-        kwargs["eval_steps"] = eval_steps
+    if eval_enabled:
+        kwargs["eval_strategy"] = "epoch"
         kwargs["per_device_eval_batch_size"] = cfg.micro_batch_size_per_gpu
     else:
         kwargs["eval_strategy"] = "no"
@@ -167,14 +168,9 @@ def train(
     logger.info("Loaded %d training examples from %s", len(train_ds), data_path)
 
     eval_ds = None
-    eval_steps = None
     if eval_data_path is not None:
         eval_ds = load_dataset(eval_data_path, eval_prompt_column, eval_completion_column, eval_max_samples, seed)
         logger.info("Loaded %d eval examples from %s", len(eval_ds), eval_data_path)
-        steps_per_epoch = math.ceil(
-            len(train_ds) / (sft_cfg.micro_batch_size_per_gpu * sft_cfg.gradient_accumulation_steps)
-        )
-        eval_steps = max(1, steps_per_epoch // EVALS_PER_EPOCH)
 
     if wandb_project is not None:
         os.environ["WANDB_PROJECT"] = wandb_project
@@ -190,7 +186,7 @@ def train(
         max_steps=max_steps,
         report_to="wandb" if wandb_project is not None else "none",
         run_name=run_name,
-        eval_steps=eval_steps,
+        eval_enabled=eval_ds is not None,
     )
 
     trainer = SFTTrainer(

@@ -174,7 +174,7 @@ if [[ -n "$REGENERATE_DATA" || ! -f "$EVAL_DIR/synthetic/report.json" ]]; then
     echo "=== Evaluating synthetic-distilled student ==="
     python examples/gsm8k_distillation/scripts/eval.py --mode student \
         --lora-path "$CHECKPOINT_DIR/synthetic" --base-model "$MODEL_ID" \
-        --output-dir "$EVAL_DIR/synthetic" --run-name synthetic $SMOKE_TEST
+        --output-dir "$EVAL_DIR/synthetic" --run-name synthetic $SMOKE_TEST --k 5
 else
     echo "=== Reusing existing synthetic eval report at $EVAL_DIR/synthetic/report.json ==="
 fi
@@ -183,7 +183,7 @@ if [[ -n "$REGENERATE_DATA" || ! -f "$EVAL_DIR/groundtruth/report.json" ]]; then
     echo "=== Evaluating ground-truth-distilled student ==="
     python examples/gsm8k_distillation/scripts/eval.py --mode student \
         --lora-path "$CHECKPOINT_DIR/groundtruth" --base-model "$MODEL_ID" \
-        --output-dir "$EVAL_DIR/groundtruth" --run-name groundtruth $SMOKE_TEST
+        --output-dir "$EVAL_DIR/groundtruth" --run-name groundtruth $SMOKE_TEST --k 5
 else
     echo "=== Reusing existing groundtruth eval report at $EVAL_DIR/groundtruth/report.json ==="
 fi
@@ -192,7 +192,7 @@ if [[ -n "$REGENERATE_DATA" || ! -f "$EVAL_DIR/nemo_baseline/report.json" ]]; th
     echo "=== Evaluating NeMo-baseline-distilled student ==="
     python examples/gsm8k_distillation/scripts/eval.py --mode student \
         --lora-path "$CHECKPOINT_DIR/nemo_baseline" --base-model "$MODEL_ID" \
-        --output-dir "$EVAL_DIR/nemo_baseline" --run-name nemo_baseline $SMOKE_TEST
+        --output-dir "$EVAL_DIR/nemo_baseline" --run-name nemo_baseline $SMOKE_TEST --k 5
 else
     echo "=== Reusing existing nemo_baseline eval report at $EVAL_DIR/nemo_baseline/report.json ==="
 fi
