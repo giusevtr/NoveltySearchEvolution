@@ -202,7 +202,7 @@ class TestPlotting:
         population.set_embedding_column(example.embedding_fn)
 
         engine = EvolutionEngine(population, selection_size=2, log_path=tmp_path / "logs")
-        engine.set_mutation(example.mut_fn, num_mutation_samples=2)
+        engine.set_mutation(example.mut_fn, num_mutation_candidates=2)
         engine.set_crossover(example.crossover_fn, num_crossover_samples=1)
         engine.set_filters([example.filter_fn])
         engine.set_selection_config(example.SELECTION_CONFIG)

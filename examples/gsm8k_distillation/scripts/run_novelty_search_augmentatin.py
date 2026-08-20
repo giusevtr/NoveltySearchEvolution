@@ -60,7 +60,7 @@ NOVELTY_KNN_K = 10
 MAX_GENERATIONS_SAFETY_CAP = 300
 
 MUTATIONS_PER_PARENT = 5
-NUM_MUTATION_SAMPLES = 10  # parents sampled per generation
+NUM_MUTATION_CANDIDATES = 10  # target total mutation candidates per generation
 CROSSOVER_CHILDREN_PER_PAIR = 5
 NUM_CROSSOVER_SAMPLES = 5  # parent pairs sampled per generation
 SELECTION_SIZE = 15
@@ -275,7 +275,7 @@ def main(
 ) -> None:
     num_samples = 6 if smoke_test else num_samples
     num_seeds = 2 if smoke_test else NUM_SEEDS
-    num_mutation_samples = 2 if smoke_test else NUM_MUTATION_SAMPLES
+    num_mutation_candidates = 2 if smoke_test else NUM_MUTATION_CANDIDATES
     mutations_per_parent = 2 if smoke_test else MUTATIONS_PER_PARENT
     num_crossover_samples = 2 if smoke_test else NUM_CROSSOVER_SAMPLES
     crossover_children_per_pair = 2 if smoke_test else CROSSOVER_CHILDREN_PER_PAIR
@@ -293,9 +293,13 @@ def main(
     population.set_embedding_column(embedding_fn)
 
     engine = EvolutionEngine(population, selection_size=selection_size, log_path=str(LOG_DIR))
-    engine.set_mutation(make_mut_fn(teacher, student, mutations_per_parent), num_mutation_samples=num_mutation_samples)
+    engine.set_mutation(
+        make_mut_fn(teacher, student, mutations_per_parent),
+        num_mutation_candidates=num_mutation_candidates,
+    )
     engine.set_crossover(
-        make_crossover_fn(teacher, student, crossover_children_per_pair), num_crossover_samples=num_crossover_samples
+        make_crossover_fn(teacher, student, crossover_children_per_pair),
+        num_crossover_samples=num_crossover_samples,
     )
     engine.set_filters([format_filter_fn])
     engine.set_selection_config(SELECTION_CONFIG)

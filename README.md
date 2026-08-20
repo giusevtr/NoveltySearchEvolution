@@ -62,7 +62,7 @@ population.set_seeds([...])              # initial data values
 population.set_embedding_column(embedding_fn)
 
 engine = EvolutionEngine(population, selection_size=30)
-engine.set_mutation(mut_fn, num_mutation_samples=15)
+engine.set_mutation(mut_fn, num_mutation_candidates=15)
 engine.set_crossover(crossover_fn, num_crossover_samples=5)
 engine.set_filters([filter_fn])
 engine.set_selection_config({
@@ -78,6 +78,17 @@ for _ in range(30):
 accepted = population.get_accepted()   # every sample that passed filter_fn: stale, active, or
                                         # inactive — excludes only REJECTED samples
 ```
+
+`num_mutation_candidates` is the target total number of mutation candidates generated per
+generation (one `mut_fn` call per candidate, assuming `mut_fn` returns a single candidate per
+call — if it returns more, the actual count is a multiple of this). To hit that target, parents
+are sampled *with replacement* from the active population, so `num_mutation_candidates` can
+exceed the number of currently active parents. `num_crossover_samples` is the number of parent
+pairs drawn per generation; each pair is drawn independently, so parents are already effectively
+sampled with replacement across the full set of pairs. By default (`parallel=True` on both
+`set_mutation` and `set_crossover`), the per-candidate `mut_fn`/`crossover_fn` calls run
+concurrently via a `ThreadPoolExecutor` — well suited to I/O-bound calls like LLM requests; pass
+`parallel=False` to either call to run its operator sequentially instead.
 
 ## Logging: Weights & Biases
 

@@ -20,7 +20,7 @@ from novelty_search_evolution import EvolutionEngine, Population, StepResult
 
 NUM_GENERATIONS = 30
 NUM_SEEDS = 3
-NUM_MUTATION_SAMPLES = 15
+NUM_MUTATION_CANDIDATES = 15
 NUM_CROSSOVER_SAMPLES = 5
 MUTATIONS_PER_PARENT = 3
 MUTATION_SIGMA = 0.08
@@ -173,7 +173,7 @@ def main():
     population.set_embedding_column(embedding_fn)
 
     engine = EvolutionEngine(population, selection_size=SELECTION_SIZE, log_path="examples/2d_example/logs")
-    engine.set_mutation(mut_fn, num_mutation_samples=NUM_MUTATION_SAMPLES)
+    engine.set_mutation(mut_fn, num_mutation_candidates=NUM_MUTATION_CANDIDATES)
     engine.set_crossover(crossover_fn, num_crossover_samples=NUM_CROSSOVER_SAMPLES)
     engine.set_filters([filter_fn])
     engine.set_selection_config(SELECTION_CONFIG)

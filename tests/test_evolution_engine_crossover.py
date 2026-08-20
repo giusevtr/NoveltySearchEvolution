@@ -111,7 +111,7 @@ class TestCrossoverCandidateGeneration:
 
     def test_mutation_and_crossover_candidates_combine(self, tmp_path):
         pop, engine = make_engine(tmp_path, seeds=[0, 1, 2, 3], selection_size=4)
-        engine.set_mutation(lambda p: [p.get_data() + 10], num_mutation_samples=3)
+        engine.set_mutation(lambda p: [p.get_data() + 10], num_mutation_candidates=3)
         engine.set_crossover(lambda p1, p2: [p1.get_data() + p2.get_data()], 2)
 
         result = engine.step()
@@ -119,7 +119,7 @@ class TestCrossoverCandidateGeneration:
 
     def test_no_crossover_fn_means_no_crossover_children(self, tmp_path):
         pop, engine = make_engine(tmp_path, seeds=[0, 1, 2, 3], selection_size=4)
-        engine.set_mutation(lambda p: [p.get_data() + 10], num_mutation_samples=2)
+        engine.set_mutation(lambda p: [p.get_data() + 10], num_mutation_candidates=2)
 
         result = engine.step()
         for child in (s for s in pop.get_all_samples() if s.get_parents()):
@@ -145,7 +145,7 @@ class TestSelectionEngineConfiguration:
 
     def test_set_selection_engine_overrides_default(self, tmp_path):
         pop, engine = make_engine(tmp_path, seeds=[0, 1, 2, 3], selection_size=1)
-        engine.set_mutation(lambda p: [p.get_data() + 10], num_mutation_samples=1)
+        engine.set_mutation(lambda p: [p.get_data() + 10], num_mutation_candidates=1)
 
         calls = []
 

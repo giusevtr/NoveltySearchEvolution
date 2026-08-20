@@ -19,7 +19,7 @@ def embedding_fn(data_list):
     return [np.array([float(d)]) for d in data_list]
 
 
-def make_engine(seeds, num_mutation_samples=2, num_crossover_samples=0, selection_size=2,
+def make_engine(seeds, num_mutation_candidates=2, num_crossover_samples=0, selection_size=2,
                  archive_update_prob=0.0, filters=None, log_path=None):
     pop = Population()
     pop.set_embedding_column(embedding_fn)
@@ -38,7 +38,7 @@ def make_engine(seeds, num_mutation_samples=2, num_crossover_samples=0, selectio
         counter["n"] += 1
         return [counter["n"]]
 
-    engine.set_mutation(mut_fn, num_mutation_samples=num_mutation_samples)
+    engine.set_mutation(mut_fn, num_mutation_candidates=num_mutation_candidates)
     engine.set_crossover(crossover_fn, num_crossover_samples=num_crossover_samples)
     engine.set_filters(filters if filters is not None else [])
     engine.set_selection_config({
@@ -51,7 +51,7 @@ def make_engine(seeds, num_mutation_samples=2, num_crossover_samples=0, selectio
 
 class TestBasicStep:
     def test_step_generates_and_selects_candidates(self):
-        pop, engine = make_engine(seeds=[0, 1, 2, 3], num_mutation_samples=2, selection_size=2)
+        pop, engine = make_engine(seeds=[0, 1, 2, 3], num_mutation_candidates=2, selection_size=2)
         result = engine.step()
 
         assert result.generation == 0
@@ -72,7 +72,7 @@ class TestBasicStep:
         pop.set_seeds([0])  # only one active sample
 
         engine = EvolutionEngine(pop, selection_size=1, log_path=tempfile.mkdtemp())
-        engine.set_mutation(lambda p: [], num_mutation_samples=0)
+        engine.set_mutation(lambda p: [], num_mutation_candidates=0)
         calls = []
 
         def crossover_fn(p1, p2):
@@ -136,7 +136,7 @@ class TestFilters:
 
 class TestActiveInactiveTransitions:
     def test_selected_become_active_others_inactive(self):
-        pop, engine = make_engine(seeds=[0, 1, 2, 3], num_mutation_samples=4, selection_size=2)
+        pop, engine = make_engine(seeds=[0, 1, 2, 3], num_mutation_candidates=4, selection_size=2)
         previously_active_ids = {s.get_id() for s in pop.get_active()}
         result = engine.step()
 
@@ -229,13 +229,13 @@ class TestLogging:
 class TestCallbackContractValidation:
     def test_mut_fn_returning_none_raises(self):
         pop, engine = make_engine(seeds=[0, 1, 2, 3])
-        engine.set_mutation(lambda parent: None, num_mutation_samples=1)
+        engine.set_mutation(lambda parent: None, num_mutation_candidates=1)
         with pytest.raises(TypeError, match="mut_fn"):
             engine.step()
 
     def test_crossover_fn_returning_scalar_raises(self):
         pop, engine = make_engine(seeds=[0, 1, 2, 3], num_crossover_samples=1)
-        engine.set_mutation(lambda parent: [], num_mutation_samples=0)
+        engine.set_mutation(lambda parent: [], num_mutation_candidates=0)
         engine.set_crossover(lambda p1, p2: 5, num_crossover_samples=1)
         with pytest.raises(TypeError, match="crossover_fn"):
             engine.step()
@@ -296,16 +296,18 @@ class TestFilterContract:
 
 class TestThinPopulation:
     def test_step_survives_empty_active_population(self):
-        pop, engine = make_engine(seeds=[0, 1], num_mutation_samples=5, selection_size=2)
+        pop, engine = make_engine(seeds=[0, 1], num_mutation_candidates=5, selection_size=2)
         for s in pop.get_active():
             s.set_inactive()
         result = engine.step()
         assert result.num_candidates == 0
 
-    def test_mutation_parents_are_distinct(self):
-        pop, engine = make_engine(seeds=[0, 1, 2, 3], num_mutation_samples=3)
+    def test_mutation_parents_sampled_with_replacement(self):
+        pop, engine = make_engine(seeds=[0, 1, 2, 3], num_mutation_candidates=10)
+        active_ids = {p.get_id() for p in pop.get_active()}
         parents = engine._select_mutation_parents()
-        assert len({p.get_id() for p in parents}) == 3
+        assert len(parents) == 10
+        assert all(p.get_id() in active_ids for p in parents)
 
 
 class TestSelectionConfigReconfiguration:

@@ -7,6 +7,7 @@ import inspect
 import json
 import random
 from collections.abc import Iterable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -107,9 +108,11 @@ class EvolutionEngine:
         self._log_path.mkdir(parents=True, exist_ok=True)
 
         self._mut_fn: Optional[MutFn] = None
-        self._num_mutation_samples = 0
+        self._num_mutation_candidates = 0
+        self._mutation_parallel = True
         self._crossover_fn: Optional[CrossoverFn] = None
         self._num_crossover_samples = 0
+        self._crossover_parallel = True
         self._filter_fns: List[FilterFn] = []
         self._selection_config: Dict[str, Any] = {}
         self._selection_engine: Optional[SelectionEngine] = None
@@ -118,13 +121,49 @@ class EvolutionEngine:
 
     # --- setup ---
 
-    def set_mutation(self, mut_fn: MutFn, num_mutation_samples: int) -> None:
-        self._mut_fn = mut_fn
-        self._num_mutation_samples = num_mutation_samples
+    def set_mutation(
+        self, mut_fn: MutFn, num_mutation_candidates: int, parallel: bool = True
+    ) -> None:
+        """Configure the mutation operator.
 
-    def set_crossover(self, crossover_fn: CrossoverFn, num_crossover_samples: int) -> None:
+        `num_mutation_candidates` is the *target total number of mutation candidates*
+        generated per generation (assuming `mut_fn` returns one candidate per call — if a
+        given `mut_fn` returns more than one candidate per call, the actual count will be a
+        multiple of this). To hit that target, parents are sampled *with replacement* from
+        the active population (`_select_mutation_parents`), one `mut_fn` call per sampled
+        parent — so this can exceed the number of currently active parents, at the cost of
+        the same parent being mutated more than once in a generation.
+
+        `parallel` (default `True`) controls whether the per-parent `mut_fn` calls run
+        concurrently via a `ThreadPoolExecutor` (suited to I/O-bound calls, e.g. LLM
+        requests) or sequentially in a loop. Candidate/genealogy construction and trace
+        logging always happen sequentially afterward, in parent order, regardless of this
+        flag.
+        """
+        self._mut_fn = mut_fn
+        self._num_mutation_candidates = num_mutation_candidates
+        self._mutation_parallel = parallel
+
+    def set_crossover(
+        self, crossover_fn: CrossoverFn, num_crossover_samples: int, parallel: bool = True
+    ) -> None:
+        """Configure the crossover operator.
+
+        `num_crossover_samples` is the number of parent pairs to draw per generation, one
+        `crossover_fn` call per pair. Each pair is drawn independently (two distinct active
+        parents per pair via `random.sample`), so the same parent can already appear across
+        multiple pairs within a generation — i.e. parents are effectively sampled with
+        replacement across the full set of pairs, the same semantics as mutation's
+        with-replacement parent sampling.
+
+        `parallel` (default `True`) controls whether the per-pair `crossover_fn` calls run
+        concurrently via a `ThreadPoolExecutor` or sequentially in a loop. Candidate
+        construction and trace logging always happen sequentially afterward, in pair order,
+        regardless of this flag.
+        """
         self._crossover_fn = crossover_fn
         self._num_crossover_samples = num_crossover_samples
+        self._crossover_parallel = parallel
 
     def set_filters(self, filter_fns: List[FilterFn]) -> None:
         self._filter_fns = filter_fns
@@ -167,9 +206,17 @@ class EvolutionEngine:
     # --- parent selection (§4.3) ---
 
     def _select_mutation_parents(self) -> List[EvoSample]:
-        return self.population.sample_random(self._num_mutation_samples, status=Status.ACTIVE)
+        """Sample `_num_mutation_candidates` active parents *with replacement*, so the
+        target candidate count can exceed the size of the active population."""
+        active = self.population.get_active()
+        if not active or self._num_mutation_candidates <= 0:
+            return []
+        return random.choices(active, k=self._num_mutation_candidates)
 
     def _select_crossover_pairs(self) -> List[Tuple[EvoSample, EvoSample]]:
+        """Sample `_num_crossover_samples` parent pairs. Each pair is drawn independently
+        (two distinct active parents per pair), so parents are effectively sampled with
+        replacement across the full set of pairs."""
         active = self.population.get_active()
         if len(active) < 2 or self._num_crossover_samples <= 0:
             return []
@@ -204,18 +251,28 @@ class EvolutionEngine:
 
         # 2. generate candidates
         candidates: List[EvoSample] = []
-        if mut_fn is not None:
-            for parent in mutation_parents:
-                for raw in _as_candidate_list(mut_fn(parent), mut_fn, "mut_fn"):
+        if mut_fn is not None and mutation_parents:
+            if self._mutation_parallel and len(mutation_parents) > 1:
+                with ThreadPoolExecutor(max_workers=len(mutation_parents)) as executor:
+                    mut_results = list(executor.map(mut_fn, mutation_parents))
+            else:
+                mut_results = [mut_fn(parent) for parent in mutation_parents]
+            for parent, raw_result in zip(mutation_parents, mut_results):
+                for raw in _as_candidate_list(raw_result, mut_fn, "mut_fn"):
                     candidate = EvoSample(data=raw, parents=[parent], generation=generation)
                     parent._add_child(candidate)
                     candidates.append(candidate)
                     trace.append(f"mutation: {parent.get_id()} -> {candidate.get_id()}")
-        if crossover_fn is not None:
-            for p1, p2 in crossover_pairs:
-                for raw in _as_candidate_list(
-                    crossover_fn(p1, p2), crossover_fn, "crossover_fn"
-                ):
+        if crossover_fn is not None and crossover_pairs:
+            if self._crossover_parallel and len(crossover_pairs) > 1:
+                with ThreadPoolExecutor(max_workers=len(crossover_pairs)) as executor:
+                    crossover_results = list(
+                        executor.map(lambda pair: crossover_fn(*pair), crossover_pairs)
+                    )
+            else:
+                crossover_results = [crossover_fn(p1, p2) for p1, p2 in crossover_pairs]
+            for (p1, p2), raw_result in zip(crossover_pairs, crossover_results):
+                for raw in _as_candidate_list(raw_result, crossover_fn, "crossover_fn"):
                     candidate = EvoSample(data=raw, parents=[p1, p2], generation=generation)
                     p1._add_child(candidate)
                     p2._add_child(candidate)
