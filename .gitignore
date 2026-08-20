@@ -51,5 +51,6 @@ TODO.md
 # Not part of the lean project
 temp/
 .keys
-.claude/
+.claude/*
+!.claude/skills/
 uv.lock

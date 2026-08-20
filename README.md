@@ -142,12 +142,10 @@ Since the framework is domain-agnostic, task-specific applications are packaged 
 skills under `.claude/skills/<skill-name>/SKILL.md` — one skill per use case, each documenting a
 ready-to-use recipe (parameter guidance + runnable pattern) for that task:
 
-- **`novelty-search-synthetic-data`** — generate a diverse synthetic dataset by mutating and
-  recombining seed examples, filtering invalid ones, and keeping the most novel survivors;
-  explains how each novelty-search parameter (`nn-k`, `distance`, `top_k`,
-  `archive_update_prob`, mutation/crossover volume, `embedding_fn`) shapes the output, and how
-  to wire in an LLM client of your choice (e.g. LangChain, or a provider SDK directly) for
-  LLM-backed mutation/filtering/embedding.
+- **`novelty-search-synthetic-data`** — recipe for implementing `mut_fn`/`crossover_fn`/
+  `filter_fn`/`embedding_fn`, a config cheat-sheet (`nn-k`, `distance`, `archive_update_prob`,
+  candidate volume), and worked-example pointers (`examples/2d_example` for a runnable
+  pure-Python start, `examples/gsm8k_distillation` for the LLM-backed pattern).
 
 ## Example: 2D novelty search
 
